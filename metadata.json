@@ -1,0 +1,6 @@
+{
+  "name": "Jale Cricket Studio",
+  "description": "Complete Cricket Tournament Design & Management Studio for creating posters, invitations, certificates, prize vouchers, player lists, schedules, scorecards, and official letters.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

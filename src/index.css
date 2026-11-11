@@ -1,0 +1,52 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  :root {
+    --font-sans: 'Plus Jakarta Sans', 'Noto Sans Devanagari', 'Mukta', sans-serif;
+    --font-hindi: 'Noto Sans Devanagari', 'Mukta', 'Hind', sans-serif;
+    --font-display: 'Oswald', 'Noto Sans Devanagari', sans-serif;
+    --font-serif: 'Cinzel', 'Rozha One', serif;
+    --font-mono: 'JetBrains Mono', monospace;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    overflow-x: hidden;
+  }
+}
+
+.font-hindi {
+  font-family: 'Noto Sans Devanagari', 'Mukta', 'Hind', sans-serif;
+}
+
+.font-display {
+  font-family: 'Oswald', 'Noto Sans Devanagari', sans-serif;
+}
+
+.font-serif-luxury {
+  font-family: 'Cinzel', 'Rozha One', serif;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Custom subtle scrollbars for studio panels */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.4);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.7);
+}
