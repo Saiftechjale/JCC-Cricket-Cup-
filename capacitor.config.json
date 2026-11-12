@@ -2,7 +2,6 @@
   "appId": "com.mirzasaif.jalecricketstudio",
   "appName": "Jale Cricket Studio",
   "webDir": "dist",
-  "bundledWebRuntime": false,
   "server": {
     "androidScheme": "https"
   },
