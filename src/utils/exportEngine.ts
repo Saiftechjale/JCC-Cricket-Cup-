@@ -481,7 +481,7 @@ async function saveFileUniversal(params: {
     }
   }
 
-  // 3. Emit global event so the HD Export Modal opens with Preview + 1-Tap Save/Share
+  // 3. Emit global event so the single HD Export Modal opens
   emitExportSuccess({
     filename: fullFilename,
     format,
@@ -491,20 +491,6 @@ async function saveFileUniversal(params: {
     width,
     height,
   });
-
-  // 4. On native Android APK, also trigger native Share/Save dialog automatically
-  if (Capacitor.isNativePlatform() && nativeUri) {
-    try {
-      await Share.share({
-        title: fullFilename,
-        text: `${fullFilename} — Jale Cricket Studio HD Export`,
-        url: nativeUri,
-        dialogTitle: 'Save or Share HD File',
-      });
-    } catch {
-      // User dismissed native share sheet; modal is still visible on screen
-    }
-  }
 }
 
 export async function exportDesignDocument(

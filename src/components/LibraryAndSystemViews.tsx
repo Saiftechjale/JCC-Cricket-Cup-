@@ -195,7 +195,6 @@ export const TemplateLibraryView: React.FC<{
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
         {filtered.map((tpl) => {
           const pdfKey = `${tpl.id}-pdf`;
-          const pngKey = `${tpl.id}-png`;
           const jpgKey = `${tpl.id}-jpg`;
 
           return (
@@ -250,12 +249,12 @@ export const TemplateLibraryView: React.FC<{
                   )}
                 </div>
 
-                {/* Instant HD Download Buttons */}
-                <div className="grid grid-cols-3 gap-1.5">
+                {/* Instant HD Download Buttons (ONLY PDF & JPG) */}
+                <div className="grid grid-cols-2 gap-2">
                   <button
                     onClick={() => handleQuickDownload(tpl, 'pdf')}
                     disabled={busyKey === pdfKey}
-                    className={`py-2 px-2 rounded-xl font-extrabold text-xs flex items-center justify-center gap-1 cursor-pointer ${
+                    className={`py-2 px-3 rounded-xl font-extrabold text-xs flex items-center justify-center gap-1.5 cursor-pointer ${
                       doneKey === pdfKey
                         ? 'bg-emerald-600 text-white'
                         : 'bg-red-600 hover:bg-red-500 text-white'
@@ -272,31 +271,12 @@ export const TemplateLibraryView: React.FC<{
                   </button>
 
                   <button
-                    onClick={() => handleQuickDownload(tpl, 'png')}
-                    disabled={busyKey === pngKey}
-                    className={`py-2 px-2 rounded-xl font-extrabold text-xs flex items-center justify-center gap-1 cursor-pointer ${
-                      doneKey === pngKey
-                        ? 'bg-emerald-600 text-white'
-                        : 'bg-blue-700 hover:bg-blue-600 text-white'
-                    }`}
-                  >
-                    {busyKey === pngKey ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    ) : doneKey === pngKey ? (
-                      <Check className="w-3.5 h-3.5 stroke-[3]" />
-                    ) : (
-                      <Download className="w-3.5 h-3.5" />
-                    )}
-                    <span>{doneKey === pngKey ? 'Done' : 'HD PNG'}</span>
-                  </button>
-
-                  <button
                     onClick={() => handleQuickDownload(tpl, 'jpg')}
                     disabled={busyKey === jpgKey}
-                    className={`py-2 px-2 rounded-xl font-extrabold text-xs flex items-center justify-center gap-1 cursor-pointer ${
+                    className={`py-2 px-3 rounded-xl font-extrabold text-xs flex items-center justify-center gap-1.5 cursor-pointer ${
                       doneKey === jpgKey
                         ? 'bg-emerald-600 text-white'
-                        : 'bg-emerald-700 hover:bg-emerald-600 text-white'
+                        : 'bg-blue-600 hover:bg-blue-500 text-white'
                     }`}
                   >
                     {busyKey === jpgKey ? (
@@ -530,31 +510,23 @@ export const SavedDesignsView: React.FC<{
                   </button>
                 </div>
 
-                {/* Direct HD Export Row */}
-                <div className="grid grid-cols-3 gap-1.5">
+                {/* Direct HD Export Row (ONLY PDF & JPG) */}
+                <div className="grid grid-cols-2 gap-2">
                   <button
                     onClick={() => handleExportSaved(doc, 'pdf')}
                     disabled={busyKey === `${doc.id}-pdf`}
-                    className="py-1.5 px-2 rounded-lg bg-red-600 hover:bg-red-500 text-white font-bold text-xs flex items-center justify-center gap-1 cursor-pointer"
+                    className="py-2 px-3 rounded-xl bg-red-600 hover:bg-red-500 text-white font-extrabold text-xs flex items-center justify-center gap-1.5 cursor-pointer"
                   >
                     <FileText className="w-3.5 h-3.5" />
-                    <span>PDF</span>
-                  </button>
-                  <button
-                    onClick={() => handleExportSaved(doc, 'png')}
-                    disabled={busyKey === `${doc.id}-png`}
-                    className="py-1.5 px-2 rounded-lg bg-blue-700 hover:bg-blue-600 text-white font-bold text-xs flex items-center justify-center gap-1 cursor-pointer"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    <span>PNG</span>
+                    <span>HD PDF</span>
                   </button>
                   <button
                     onClick={() => handleExportSaved(doc, 'jpg')}
                     disabled={busyKey === `${doc.id}-jpg`}
-                    className="py-1.5 px-2 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-xs flex items-center justify-center gap-1 cursor-pointer"
+                    className="py-2 px-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-extrabold text-xs flex items-center justify-center gap-1.5 cursor-pointer"
                   >
                     <ImageIcon className="w-3.5 h-3.5" />
-                    <span>JPG</span>
+                    <span>HD JPG</span>
                   </button>
                 </div>
               </div>

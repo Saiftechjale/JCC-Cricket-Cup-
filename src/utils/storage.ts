@@ -4,22 +4,26 @@ import {
   DEFAULT_RESULTS,
   DEFAULT_SCHEDULES,
   DEFAULT_SCORECARDS,
+  DEFAULT_SPONSORS,
+  DEFAULT_TEAMS,
   DEFAULT_TOURNAMENT_PROFILES,
 } from '../data/defaultTemplates';
 import {
   DesignDocument,
   FullStudioBackup,
+  LocalSponsorAd,
   MatchResultRecord,
   MatchScheduleRecord,
   MediaAsset,
   PlayerRecord,
   ScorecardRecord,
   StudioSettings,
+  TeamSquadRecord,
   TournamentProfile,
 } from '../types/studio';
 
 const DB_NAME = 'jale_cricket_studio_idb_v1';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const SETTINGS_KEY = 'jale_cricket_studio_settings_v1';
 
 export const DEFAULT_SETTINGS: StudioSettings = {
@@ -28,7 +32,7 @@ export const DEFAULT_SETTINGS: StudioSettings = {
   autoSave: true,
   defaultExportFormat: 'pdf',
   defaultPageSize: 'A4-Portrait',
-  highResExportScale: 2,
+  highResExportScale: 3,
   activeProfileId: 'profile-jale-s2',
 };
 
@@ -60,6 +64,8 @@ function openStudioDB(): Promise<IDBDatabase> {
         'savedDesigns',
         'customTemplates',
         'players',
+        'teams',
+        'sponsors',
         'schedules',
         'results',
         'scorecards',
@@ -119,6 +125,8 @@ export interface HydratedStudioState {
   savedDesigns: DesignDocument[];
   customTemplates: DesignDocument[];
   players: PlayerRecord[];
+  teams: TeamSquadRecord[];
+  sponsors: LocalSponsorAd[];
   schedules: MatchScheduleRecord[];
   results: MatchResultRecord[];
   scorecards: ScorecardRecord[];
@@ -140,6 +148,18 @@ export async function hydrateStudioData(): Promise<HydratedStudioState> {
   if (players.length === 0) {
     players = DEFAULT_PLAYERS;
     await idbSaveAll('players', players);
+  }
+
+  let teams = await idbGetAll<TeamSquadRecord>('teams');
+  if (teams.length === 0) {
+    teams = DEFAULT_TEAMS;
+    await idbSaveAll('teams', teams);
+  }
+
+  let sponsors = await idbGetAll<LocalSponsorAd>('sponsors');
+  if (sponsors.length === 0) {
+    sponsors = DEFAULT_SPONSORS;
+    await idbSaveAll('sponsors', sponsors);
   }
 
   let schedules = await idbGetAll<MatchScheduleRecord>('schedules');
@@ -172,6 +192,8 @@ export async function hydrateStudioData(): Promise<HydratedStudioState> {
     savedDesigns,
     customTemplates,
     players,
+    teams,
+    sponsors,
     schedules,
     results,
     scorecards,
@@ -185,6 +207,8 @@ export async function restoreFullBackup(backup: FullStudioBackup): Promise<void>
   if (Array.isArray(backup.savedDesigns)) await idbSaveAll('savedDesigns', backup.savedDesigns);
   if (Array.isArray(backup.customTemplates)) await idbSaveAll('customTemplates', backup.customTemplates);
   if (Array.isArray(backup.players)) await idbSaveAll('players', backup.players);
+  if (Array.isArray(backup.teams)) await idbSaveAll('teams', backup.teams);
+  if (Array.isArray(backup.sponsors)) await idbSaveAll('sponsors', backup.sponsors);
   if (Array.isArray(backup.schedules)) await idbSaveAll('schedules', backup.schedules);
   if (Array.isArray(backup.results)) await idbSaveAll('results', backup.results);
   if (Array.isArray(backup.scorecards)) await idbSaveAll('scorecards', backup.scorecards);

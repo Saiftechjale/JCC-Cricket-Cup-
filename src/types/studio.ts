@@ -161,6 +161,32 @@ export interface DesignDocument {
   description?: string;
 }
 
+/**
+ * 8-Team Tournament Roster: Each team has a name, village/place, captain/mobile,
+ * and 15 player names (1-11 Playing XI + 12-15 Extra Players)
+ */
+export interface TeamSquadRecord {
+  id: string;
+  teamNumber: number; // 1 to 8
+  teamName: string;
+  village: string;
+  captainName: string;
+  mobileNumber: string;
+  players: string[]; // Array of 15 player names
+  updatedAt: string;
+}
+
+export interface LocalSponsorAd {
+  id: string;
+  shopName: string;
+  ownerName: string;
+  category?: string;
+  address: string;
+  mobile: string;
+  tagline: string;
+  micScript: string;
+}
+
 export interface PlayerRecord {
   id: string;
   playerName: string;
@@ -178,7 +204,7 @@ export interface PlayerRecord {
 export interface MatchScheduleRecord {
   id: string;
   matchNumber: number;
-  stage: 'League Match' | 'Quarter Final' | 'Semi Final' | 'Grand Final';
+  stage: 'Quarter Final 1' | 'Quarter Final 2' | 'Quarter Final 3' | 'Quarter Final 4' | 'Semi Final 1' | 'Semi Final 2' | 'Grand Final' | 'League Match' | 'Quarter Final' | 'Semi Final';
   teamA: string;
   teamB: string;
   matchDate: string;
@@ -280,6 +306,8 @@ export interface FullStudioBackup {
   savedDesigns: DesignDocument[];
   customTemplates: DesignDocument[];
   players: PlayerRecord[];
+  teams?: TeamSquadRecord[];
+  sponsors?: LocalSponsorAd[];
   schedules: MatchScheduleRecord[];
   results: MatchResultRecord[];
   scorecards: ScorecardRecord[];

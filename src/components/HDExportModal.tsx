@@ -1,20 +1,20 @@
 import React, { useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { Share } from '@capacitor/share';
-import { Check, Download, FileText, Share2, Sparkles, X } from 'lucide-react';
+import { Check, Download, FileText, Sparkles, X } from 'lucide-react';
 import { Language } from '../types/studio';
 import { ExportResultPayload } from '../utils/exportEngine';
 
 export const HDExportModal: React.FC<{ lang: Language }> = ({ lang }) => {
   const [payload, setPayload] = useState<ExportResultPayload | null>(null);
-  const [clickedBtn, setClickedBtn] = useState<'save' | 'share' | null>(null);
+  const [clicked, setClicked] = useState(false);
 
   useEffect(() => {
     const handler = (e: Event) => {
       const custom = e as CustomEvent<ExportResultPayload>;
       if (custom.detail) {
         setPayload(custom.detail);
-        setClickedBtn(null);
+        setClicked(false);
       }
     };
     window.addEventListener('jale-export-success', handler);
@@ -23,63 +23,36 @@ export const HDExportModal: React.FC<{ lang: Language }> = ({ lang }) => {
 
   if (!payload) return null;
 
-  const handleDirectDownload = () => {
-    setClickedBtn('save');
-    if (payload.blobUrl) {
-      const link = document.createElement('a');
-      link.href = payload.blobUrl;
-      link.download = payload.filename;
-      document.body.appendChild(link);
-      link.click();
-      setTimeout(() => {
-        if (link.parentNode) document.body.removeChild(link);
-      }, 300);
-    } else if (payload.previewDataUrl) {
-      const link = document.createElement('a');
-      link.href = payload.previewDataUrl;
-      link.download = payload.filename;
-      document.body.appendChild(link);
-      link.click();
-      setTimeout(() => {
-        if (link.parentNode) document.body.removeChild(link);
-      }, 300);
-    }
-    setTimeout(() => setClickedBtn(null), 1800);
-  };
-
-  const handleShareOrOpen = async () => {
-    setClickedBtn('share');
+  const handleSingleDownloadAction = async () => {
+    setClicked(true);
     try {
+      // On Android APK, open the native save/share action when user taps this single button
       if (Capacitor.isNativePlatform() && payload.nativeUri) {
         await Share.share({
           title: payload.filename,
           text: `${payload.filename} — Jale Cricket Studio HD`,
           url: payload.nativeUri,
-          dialogTitle: 'Save to Phone / Share on WhatsApp',
+          dialogTitle: 'Save or Share HD File',
         });
-        setTimeout(() => setClickedBtn(null), 1500);
+        setTimeout(() => setClicked(false), 1200);
         return;
       }
 
-      if (payload.blobUrl && navigator.canShare) {
-        const res = await fetch(payload.blobUrl);
-        const blob = await res.blob();
-        const file = new File([blob], payload.filename, { type: blob.type });
-        if (navigator.canShare({ files: [file] })) {
-          await navigator.share({
-            title: payload.filename,
-            text: `${payload.filename} — Jale Cricket Studio HD`,
-            files: [file],
-          });
-          setTimeout(() => setClickedBtn(null), 1500);
-          return;
-        }
+      // On Web / Mobile Browser, trigger direct download
+      const urlToDownload = payload.blobUrl || payload.previewDataUrl;
+      if (urlToDownload) {
+        const link = document.createElement('a');
+        link.href = urlToDownload;
+        link.download = payload.filename;
+        document.body.appendChild(link);
+        link.click();
+        setTimeout(() => {
+          if (link.parentNode) document.body.removeChild(link);
+        }, 300);
       }
-
-      // Fallback to direct download
-      handleDirectDownload();
+      setTimeout(() => setClicked(false), 1500);
     } catch {
-      setTimeout(() => setClickedBtn(null), 1200);
+      setTimeout(() => setClicked(false), 1200);
     }
   };
 
@@ -95,7 +68,7 @@ export const HDExportModal: React.FC<{ lang: Language }> = ({ lang }) => {
             <div className="min-w-0">
               <h3 className="text-sm font-black truncate">
                 {lang === 'hi'
-                  ? 'HD फाइल सफलतापूर्वक तैयार है!'
+                  ? 'HD फाइल तैयार है!'
                   : 'Ultra-HD File Ready!'}
               </h3>
               <p className="text-[11px] text-emerald-100 truncate">
@@ -119,7 +92,7 @@ export const HDExportModal: React.FC<{ lang: Language }> = ({ lang }) => {
                 src={payload.previewDataUrl}
                 alt={payload.filename}
                 referrerPolicy="no-referrer"
-                className="max-h-60 w-auto object-contain rounded shadow-lg"
+                className="max-h-64 w-auto object-contain rounded shadow-lg"
               />
               <span className="mt-2 text-[11px] font-bold text-amber-300 flex items-center gap-1">
                 <Sparkles className="w-3.5 h-3.5" />
@@ -127,13 +100,6 @@ export const HDExportModal: React.FC<{ lang: Language }> = ({ lang }) => {
                   ? `${payload.width} × ${payload.height} px · Ultra-HD (${payload.format.toUpperCase()})`
                   : `Original HD Quality (${payload.format.toUpperCase()})`}
               </span>
-              {(payload.format === 'png' || payload.format === 'jpg') && (
-                <span className="text-[10px] text-slate-400 mt-0.5 text-center">
-                  {lang === 'hi'
-                    ? 'टिप: आप ऊपर दी गई इमेज को दबाए रखकर (Long-Press) भी सीधे गैलरी में सेव कर सकते हैं'
-                    : 'Tip: You can also long-press the image above to save directly to Gallery'}
-                </span>
-              )}
             </div>
           ) : (
             <div className="rounded-xl bg-slate-100 dark:bg-slate-800 p-5 text-center space-y-2">
@@ -144,61 +110,28 @@ export const HDExportModal: React.FC<{ lang: Language }> = ({ lang }) => {
             </div>
           )}
 
-          {payload.nativeUri && (
-            <div className="p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 text-[11px] font-bold text-emerald-800 dark:text-emerald-200 text-center">
-              {lang === 'hi'
-                ? '✓ आपके फोन के Documents फोल्डर में सेव हो गया है!'
-                : '✓ Saved directly to your device Documents folder!'}
-            </div>
-          )}
-
-          {/* Action Buttons */}
-          <div className="grid grid-cols-1 gap-2.5 pt-1">
+          {/* SINGLE UNIFIED DOWNLOAD / SAVE BUTTON */}
+          <div className="pt-1">
             <button
-              onClick={handleShareOrOpen}
-              className="w-full py-3 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs sm:text-sm flex items-center justify-center gap-2 shadow-md cursor-pointer"
+              onClick={handleSingleDownloadAction}
+              className="w-full py-3.5 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-sm flex items-center justify-center gap-2 shadow-md cursor-pointer"
             >
-              {clickedBtn === 'share' ? (
+              {clicked ? (
                 <>
-                  <Check className="w-4 h-4 stroke-[3]" />
+                  <Check className="w-5 h-5 stroke-[3]" />
                   <span>
                     {lang === 'hi'
-                      ? '✓ खुल रहा है (Opening Share/Save)...'
-                      : '✓ Opening Share / Save...'}
+                      ? '✓ सेव / डाउनलोड हो गया!'
+                      : '✓ Saved / Downloaded!'}
                   </span>
                 </>
               ) : (
                 <>
-                  <Share2 className="w-4 h-4" />
+                  <Download className="w-5 h-5" />
                   <span>
                     {lang === 'hi'
-                      ? 'WhatsApp / Gallery / Print में सेव व शेयर करें'
-                      : 'Save to Gallery / Share on WhatsApp'}
-                  </span>
-                </>
-              )}
-            </button>
-
-            <button
-              onClick={handleDirectDownload}
-              className="w-full py-2.5 px-4 rounded-xl bg-slate-900 dark:bg-slate-800 hover:bg-slate-800 text-white font-extrabold text-xs flex items-center justify-center gap-2 border border-slate-700 cursor-pointer"
-            >
-              {clickedBtn === 'save' ? (
-                <>
-                  <Check className="w-4 h-4 text-emerald-400 stroke-[3]" />
-                  <span className="text-emerald-400">
-                    {lang === 'hi'
-                      ? '✓ डाउनलोड शुरू हो गया!'
-                      : '✓ Download Triggered!'}
-                  </span>
-                </>
-              ) : (
-                <>
-                  <Download className="w-4 h-4 text-amber-400" />
-                  <span>
-                    {lang === 'hi'
-                      ? `डायरेक्ट डाउनलोड करें (${payload.format.toUpperCase()})`
-                      : `Direct Download (${payload.format.toUpperCase()})`}
+                      ? `डाउनलोड / सेव करें (${payload.format.toUpperCase()})`
+                      : `Download / Save (${payload.format.toUpperCase()})`}
                   </span>
                 </>
               )}

@@ -595,7 +595,6 @@ export const DashboardHomeView: React.FC<DashboardHomeViewProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
           {displayedTemplates.map((tpl) => {
             const pdfKey = `${tpl.id}-pdf`;
-            const pngKey = `${tpl.id}-png`;
             const jpgKey = `${tpl.id}-jpg`;
 
             return (
@@ -614,7 +613,7 @@ export const DashboardHomeView: React.FC<DashboardHomeViewProps> = ({
                   </div>
                 </div>
 
-                {/* Card Footer: Title + Edit + Instant HD PDF / PNG / JPG Buttons */}
+                {/* Card Footer: Title + Edit + Instant HD PDF / JPG Buttons */}
                 <div className="p-3.5 sm:p-4 space-y-3">
                   <div>
                     <h3 className="text-sm font-extrabold text-slate-900 dark:text-white leading-snug">
@@ -638,12 +637,12 @@ export const DashboardHomeView: React.FC<DashboardHomeViewProps> = ({
                     </span>
                   </button>
 
-                  {/* 1-Click Direct HD Download Strip (PDF / PNG / JPG) */}
-                  <div className="grid grid-cols-3 gap-1.5">
+                  {/* 1-Click Direct HD Download Strip (ONLY PDF & JPG) */}
+                  <div className="grid grid-cols-2 gap-2">
                     <button
                       onClick={() => handleQuickExport(tpl, 'pdf')}
                       disabled={busyActionId === pdfKey}
-                      className={`py-2 px-2 rounded-xl font-extrabold text-xs flex items-center justify-center gap-1 cursor-pointer transition-all ${
+                      className={`py-2 px-3 rounded-xl font-extrabold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-all ${
                         doneActionId === pdfKey
                           ? 'bg-emerald-600 text-white'
                           : 'bg-red-600 hover:bg-red-500 text-white'
@@ -660,31 +659,12 @@ export const DashboardHomeView: React.FC<DashboardHomeViewProps> = ({
                     </button>
 
                     <button
-                      onClick={() => handleQuickExport(tpl, 'png')}
-                      disabled={busyActionId === pngKey}
-                      className={`py-2 px-2 rounded-xl font-extrabold text-xs flex items-center justify-center gap-1 cursor-pointer transition-all ${
-                        doneActionId === pngKey
-                          ? 'bg-emerald-600 text-white'
-                          : 'bg-blue-700 hover:bg-blue-600 text-white'
-                      }`}
-                    >
-                      {busyActionId === pngKey ? (
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      ) : doneActionId === pngKey ? (
-                        <Check className="w-3.5 h-3.5 stroke-[3]" />
-                      ) : (
-                        <Download className="w-3.5 h-3.5" />
-                      )}
-                      <span>{doneActionId === pngKey ? 'Done!' : 'HD PNG'}</span>
-                    </button>
-
-                    <button
                       onClick={() => handleQuickExport(tpl, 'jpg')}
                       disabled={busyActionId === jpgKey}
-                      className={`py-2 px-2 rounded-xl font-extrabold text-xs flex items-center justify-center gap-1 cursor-pointer transition-all ${
+                      className={`py-2 px-3 rounded-xl font-extrabold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-all ${
                         doneActionId === jpgKey
                           ? 'bg-emerald-600 text-white'
-                          : 'bg-emerald-700 hover:bg-emerald-600 text-white'
+                          : 'bg-blue-600 hover:bg-blue-500 text-white'
                       }`}
                     >
                       {busyActionId === jpgKey ? (

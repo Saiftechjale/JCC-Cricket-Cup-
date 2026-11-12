@@ -703,7 +703,7 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
             <button
               onClick={() => handleExport('pdf')}
               disabled={exportingFormat !== null}
-              className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-extrabold shadow-xs transition-all cursor-pointer whitespace-nowrap ${
+              className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-extrabold shadow-xs transition-all cursor-pointer whitespace-nowrap ${
                 clickedBtn === 'exp-pdf'
                   ? 'bg-emerald-600 text-white'
                   : 'bg-red-600 hover:bg-red-500 text-white'
@@ -720,28 +720,9 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
             </button>
 
             <button
-              onClick={() => handleExport('png')}
-              disabled={exportingFormat !== null}
-              className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-extrabold shadow-xs transition-all cursor-pointer whitespace-nowrap ${
-                clickedBtn === 'exp-png'
-                  ? 'bg-emerald-600 text-white'
-                  : 'bg-[#0B192C] dark:bg-amber-500 hover:bg-slate-800 dark:hover:bg-amber-400 text-white dark:text-slate-950'
-              }`}
-            >
-              {exportingFormat === 'png' ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              ) : clickedBtn === 'exp-png' ? (
-                <Check className="w-3.5 h-3.5 stroke-[3]" />
-              ) : (
-                <Download className="w-3.5 h-3.5" />
-              )}
-              <span>PNG</span>
-            </button>
-
-            <button
               onClick={() => handleExport('jpg')}
               disabled={exportingFormat !== null}
-              className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-extrabold shadow-xs transition-all cursor-pointer whitespace-nowrap ${
+              className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-extrabold shadow-xs transition-all cursor-pointer whitespace-nowrap ${
                 clickedBtn === 'exp-jpg'
                   ? 'bg-emerald-600 text-white'
                   : 'bg-blue-700 hover:bg-blue-600 text-white'
@@ -1756,6 +1737,173 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
                 </div>
               )}
 
+              {/* TABLE EDITING CONTROLS (15-Player List, Match Schedule, Prize Table, etc.) */}
+              {selectedElement.type === 'table' && (
+                <div className="space-y-3 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-extrabold text-slate-900 dark:text-white flex items-center gap-1.5">
+                      <TableIcon className="w-4 h-4 text-emerald-600" />
+                      <span>
+                        {lang === 'hi'
+                          ? 'टेबल डेटा एडिट करें (Edit Table)'
+                          : 'Edit Table Content'}
+                      </span>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const cols = selectedElement.tableHeaders?.length || 2;
+                        const nextRowIdx = (selectedElement.tableRows?.length || 0) + 1;
+                        const newRow = Array.from({ length: cols }, (_, cIdx) =>
+                          cIdx === 0 ? `${nextRowIdx}` : ''
+                        );
+                        updateSelectedElements((el) => ({
+                          ...el,
+                          tableRows: [...(el.tableRows || []), newRow],
+                        }));
+                      }}
+                      className="px-2 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-extrabold cursor-pointer"
+                    >
+                      + {lang === 'hi' ? 'पंक्ति जोड़ें' : 'Add Row'}
+                    </button>
+                  </div>
+
+                  {/* Table Headers Editor */}
+                  {selectedElement.tableHeaders && (
+                    <div className="space-y-1">
+                      <span className="text-[10px] font-bold text-slate-500 uppercase">
+                        {lang === 'hi' ? 'कॉलम हेडिंग (Headers):' : 'Column Headers:'}
+                      </span>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {selectedElement.tableHeaders.map((th, hIdx) => (
+                          <input
+                            key={hIdx}
+                            type="text"
+                            value={th}
+                            onChange={(e) => {
+                              const nextHeaders = [...(selectedElement.tableHeaders || [])];
+                              nextHeaders[hIdx] = e.target.value;
+                              updateSelectedElements((el) => ({
+                                ...el,
+                                tableHeaders: nextHeaders,
+                              }));
+                            }}
+                            className="px-2 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-xs font-extrabold text-slate-900 dark:text-white"
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Table Rows Editor */}
+                  <div className="space-y-1.5 max-h-64 overflow-y-auto pr-1">
+                    <span className="text-[10px] font-bold text-slate-500 uppercase block">
+                      {lang === 'hi'
+                        ? 'सभी पंक्तियाँ / खिलाड़ी नाम (Rows):'
+                        : 'Table Rows:'}
+                    </span>
+                    {(selectedElement.tableRows || []).map((row, rIdx) => (
+                      <div key={rIdx} className="flex items-center gap-1">
+                        {row.map((cell, cIdx) => (
+                          <input
+                            key={cIdx}
+                            type="text"
+                            value={cell}
+                            onChange={(e) => {
+                              const nextRows = (selectedElement.tableRows || []).map(
+                                (r, idx) =>
+                                  idx === rIdx
+                                    ? r.map((c, colI) =>
+                                        colI === cIdx ? e.target.value : c
+                                      )
+                                    : r
+                              );
+                              updateSelectedElements((el) => ({
+                                ...el,
+                                tableRows: nextRows,
+                              }));
+                            }}
+                            className={`px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-xs font-semibold text-slate-900 dark:text-white ${
+                              cIdx === 0 ? 'w-14 text-center font-mono' : 'flex-1 min-w-0'
+                            }`}
+                          />
+                        ))}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const nextRows = (selectedElement.tableRows || []).filter(
+                              (_, idx) => idx !== rIdx
+                            );
+                            updateSelectedElements((el) => ({
+                              ...el,
+                              tableRows: nextRows,
+                            }));
+                          }}
+                          className="p-1 text-red-500 hover:bg-red-50 rounded cursor-pointer shrink-0"
+                          title="Delete Row"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Table Font Size & Header Color */}
+                  <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-200 dark:border-slate-700">
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 mb-0.5">
+                        {lang === 'hi' ? 'फॉन्ट साइज' : 'Font Size'}
+                      </label>
+                      <input
+                        type="number"
+                        min={10}
+                        max={40}
+                        value={selectedElement.fontSize || 16}
+                        onChange={(e) =>
+                          updateSelectedElements((el) => ({
+                            ...el,
+                            fontSize: Number(e.target.value),
+                          }))
+                        }
+                        className="w-full px-2 py-1 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 mb-0.5">
+                        {lang === 'hi' ? 'हेडर रंग' : 'Header Bg'}
+                      </label>
+                      <input
+                        type="color"
+                        value={selectedElement.headerBgColor || '#0B192C'}
+                        onChange={(e) =>
+                          updateSelectedElements((el) => ({
+                            ...el,
+                            headerBgColor: e.target.value,
+                          }))
+                        }
+                        className="w-full h-7 rounded cursor-pointer"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 mb-0.5">
+                        {lang === 'hi' ? 'हेडर टेक्स्ट' : 'Header Text'}
+                      </label>
+                      <input
+                        type="color"
+                        value={selectedElement.headerTextColor || '#FFFFFF'}
+                        onChange={(e) =>
+                          updateSelectedElements((el) => ({
+                            ...el,
+                            headerTextColor: e.target.value,
+                          }))
+                        }
+                        className="w-full h-7 rounded cursor-pointer"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* TEXT EDITING CONTROLS */}
               {(selectedElement.type === 'heading' ||
                 selectedElement.type === 'subheading' ||
@@ -1773,6 +1921,7 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
                         updateSelectedElements((el) => ({
                           ...el,
                           text: e.target.value,
+                          bindField: undefined,
                         }))
                       }
                       className="w-full p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-sm font-semibold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
@@ -2128,12 +2277,6 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
                 className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-500 text-white text-xs font-bold cursor-pointer"
               >
                 HD PDF
-              </button>
-              <button
-                onClick={() => handleExport('png')}
-                className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold cursor-pointer"
-              >
-                HD PNG
               </button>
               <button
                 onClick={() => handleExport('jpg')}

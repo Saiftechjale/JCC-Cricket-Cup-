@@ -47,6 +47,8 @@ import {
   DEFAULT_RESULTS,
   DEFAULT_SCHEDULES,
   DEFAULT_SCORECARDS,
+  DEFAULT_SPONSORS,
+  DEFAULT_TEAMS,
   DEFAULT_TOURNAMENT_PROFILES,
   buildMasterTemplates,
   syncProfileToDesign,
@@ -54,12 +56,14 @@ import {
 import {
   DesignDocument,
   FullStudioBackup,
+  LocalSponsorAd,
   MatchResultRecord,
   MatchScheduleRecord,
   MediaAsset,
   PlayerRecord,
   ScorecardRecord,
   StudioSettings,
+  TeamSquadRecord,
   TemplateCategory,
   TournamentProfile,
   WorkspaceSection,
@@ -85,14 +89,14 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'tournament-profile', labelHi: '2. टूर्नामेंट प्रोफाइल', labelEn: '2. Tournament Profile', icon: Shield },
   { id: 'poster-maker', labelHi: '3. पोस्टर और बैनर मेकर', labelEn: '3. Poster & Banner Maker', icon: Palette, category: 'poster' },
   { id: 'invitation-maker', labelHi: '4. आमंत्रण कार्ड मेकर', labelEn: '4. Invitation Card Maker', icon: Mail, category: 'invitation' },
-  { id: 'player-list-maker', labelHi: '5. खिलाड़ी सूची मेकर', labelEn: '5. Player List Maker', icon: Users, category: 'player-list' },
+  { id: 'player-list-maker', labelHi: '5. 8-टीम & 15-खिलाड़ी मेकर', labelEn: '5. 8-Team & 15-Player Maker', icon: Users, category: 'player-list' },
   { id: 'rules-maker', labelHi: '6. नियम व शर्तें मेकर', labelEn: '6. Rules & Regulations', icon: ScrollText, category: 'rules' },
   { id: 'prize-maker', labelHi: '7. पुरस्कार वितरण मेकर', labelEn: '7. Prize Distribution', icon: Trophy, category: 'prize' },
   { id: 'certificate-maker', labelHi: '8. सर्टिफिकेट मेकर', labelEn: '8. Certificate Maker', icon: Award, category: 'certificate' },
   { id: 'voucher-maker', labelHi: '9. प्राइज वाउचर मेकर', labelEn: '9. Prize Voucher Maker', icon: CreditCard, category: 'voucher' },
-  { id: 'schedule-maker', labelHi: '10. मैच शेड्यूल मेकर', labelEn: '10. Match Schedule Maker', icon: Calendar, category: 'schedule' },
-  { id: 'result-maker', labelHi: '11. मैच रिजल्ट मेकर', labelEn: '11. Match Result Maker', icon: FileCheck, category: 'result' },
-  { id: 'scorecard-maker', labelHi: '12. स्कोरकार्ड मेकर', labelEn: '12. Scorecard Maker', icon: ClipboardList, category: 'scorecard' },
+  { id: 'schedule-maker', labelHi: '10. 8-टीम शेड्यूल & FB Live', labelEn: '10. 8-Team Schedule & Live', icon: Calendar, category: 'schedule' },
+  { id: 'result-maker', labelHi: '11. मैच रिजल्ट & अखबार खबर', labelEn: '11. Results & Newspaper', icon: FileCheck, category: 'result' },
+  { id: 'scorecard-maker', labelHi: '12. स्कोरकार्ड & माइक प्रचार', labelEn: '12. Scorecard & Mic Prachar', icon: ClipboardList, category: 'scorecard' },
   { id: 'letter-maker', labelHi: '13. आधिकारिक पत्र मेकर', labelEn: '13. Official Letter Maker', icon: FileText, category: 'letter' },
   { id: 'template-library', labelHi: '14. टेम्पलेट लाइब्रेरी', labelEn: '14. Template Library', icon: LayoutTemplate },
   { id: 'saved-designs', labelHi: '15. मेरे सेव डिज़ाइन', labelEn: '15. My Saved Designs', icon: FolderHeart },
@@ -113,6 +117,8 @@ export default function App() {
   const [savedDesigns, setSavedDesigns] = useState<DesignDocument[]>([]);
   const [customTemplates, setCustomTemplates] = useState<DesignDocument[]>([]);
   const [players, setPlayers] = useState<PlayerRecord[]>(DEFAULT_PLAYERS);
+  const [teams, setTeams] = useState<TeamSquadRecord[]>(DEFAULT_TEAMS);
+  const [sponsors, setSponsors] = useState<LocalSponsorAd[]>(DEFAULT_SPONSORS);
   const [schedules, setSchedules] =
     useState<MatchScheduleRecord[]>(DEFAULT_SCHEDULES);
   const [results, setResults] = useState<MatchResultRecord[]>(DEFAULT_RESULTS);
@@ -135,6 +141,8 @@ export default function App() {
       setSavedDesigns(state.savedDesigns);
       setCustomTemplates(state.customTemplates);
       setPlayers(state.players);
+      setTeams(state.teams);
+      setSponsors(state.sponsors);
       setSchedules(state.schedules);
       setResults(state.results);
       setScorecards(state.scorecards);
@@ -173,7 +181,11 @@ export default function App() {
   }, [activeProfile]);
 
   const allTemplates = useMemo(() => {
-    return [...customTemplates, ...masterTemplates];
+    const customIds = new Set(customTemplates.map((t) => t.id));
+    return [
+      ...customTemplates,
+      ...masterTemplates.filter((m) => !customIds.has(m.id)),
+    ];
   }, [customTemplates, masterTemplates]);
 
   const lang = settings.language;
@@ -270,13 +282,15 @@ export default function App() {
   };
 
   const handleSaveDesign = (doc: DesignDocument, asTemplate?: boolean) => {
+    const nowIso = new Date().toISOString();
+
     if (asTemplate) {
       const customTpl: DesignDocument = {
         ...doc,
         id: `custom-tpl-${Date.now()}`,
         isTemplate: true,
         isCustomTemplate: true,
-        updatedAt: new Date().toISOString(),
+        updatedAt: nowIso,
       };
       const nextCustom = [customTpl, ...customTemplates];
       setCustomTemplates(nextCustom);
@@ -284,37 +298,57 @@ export default function App() {
       return;
     }
 
-    const exists = savedDesigns.some((d) => d.id === doc.id && !doc.isTemplate);
-    let nextSaved: DesignDocument[];
-    if (exists) {
-      nextSaved = savedDesigns.map((d) =>
-        d.id === doc.id
-          ? {
-              ...doc,
-              isTemplate: false,
-              version: (d.version || 1) + 1,
-              updatedAt: new Date().toISOString(),
-            }
-          : d
-      );
-    } else {
-      const savedCopy: DesignDocument = {
+    // 1. If the user is editing a template (master or custom), override/update it in customTemplates
+    // so reopening Poster Maker, Invitation Maker, or Dashboard keeps their exact saved edits!
+    const isKnownTemplate =
+      doc.isTemplate ||
+      masterTemplates.some((m) => m.id === doc.id) ||
+      customTemplates.some((c) => c.id === doc.id);
+
+    if (isKnownTemplate) {
+      const updatedTpl: DesignDocument = {
         ...doc,
-        id: doc.isTemplate ? `saved-${Date.now()}` : doc.id,
-        isTemplate: false,
-        version: 1,
-        updatedAt: new Date().toISOString(),
+        isTemplate: true,
+        isCustomTemplate: true,
+        updatedAt: nowIso,
       };
-      nextSaved = [savedCopy, ...savedDesigns];
-      setEditorDoc(savedCopy);
+      const existsInCustom = customTemplates.some((c) => c.id === doc.id);
+      const nextCustom = existsInCustom
+        ? customTemplates.map((c) => (c.id === doc.id ? updatedTpl : c))
+        : [updatedTpl, ...customTemplates];
+      setCustomTemplates(nextCustom);
+      idbSaveAll('customTemplates', nextCustom);
+      setEditorDoc(updatedTpl);
     }
+
+    // 2. Also save/update in savedDesigns so it appears in "My Saved Designs"
+    const savedId = doc.id.startsWith('saved-') ? doc.id : `saved-${doc.id}`;
+    const existsInSaved = savedDesigns.some((d) => d.id === savedId);
+    const savedEntry: DesignDocument = {
+      ...doc,
+      id: savedId,
+      isTemplate: false,
+      version: existsInSaved
+        ? (savedDesigns.find((d) => d.id === savedId)?.version || 1) + 1
+        : 1,
+      updatedAt: nowIso,
+    };
+    const nextSaved = existsInSaved
+      ? savedDesigns.map((d) => (d.id === savedId ? savedEntry : d))
+      : [savedEntry, ...savedDesigns];
+
     setSavedDesigns(nextSaved);
     idbSaveAll('savedDesigns', nextSaved);
   };
 
-  const handleSavePlayers = (list: PlayerRecord[]) => {
-    setPlayers(list);
-    idbSaveAll('players', list);
+  const handleSaveTeams = (list: TeamSquadRecord[]) => {
+    setTeams(list);
+    idbSaveAll('teams', list);
+  };
+
+  const handleSaveSponsors = (list: LocalSponsorAd[]) => {
+    setSponsors(list);
+    idbSaveAll('sponsors', list);
   };
 
   const handleSaveSchedules = (list: MatchScheduleRecord[]) => {
@@ -354,6 +388,8 @@ export default function App() {
     setSavedDesigns(hydrated.savedDesigns);
     setCustomTemplates(hydrated.customTemplates);
     setPlayers(hydrated.players);
+    setTeams(hydrated.teams);
+    setSponsors(hydrated.sponsors);
     setSchedules(hydrated.schedules);
     setResults(hydrated.results);
     setScorecards(hydrated.scorecards);
@@ -370,13 +406,15 @@ export default function App() {
     activeSection === 'letter-maker';
 
   const fullBackupObject: FullStudioBackup = {
-    appVersion: '3.0.0',
+    appVersion: '4.0.0',
     exportedAt: new Date().toISOString(),
     settings,
     profiles,
     savedDesigns,
     customTemplates,
     players,
+    teams,
+    sponsors,
     schedules,
     results,
     scorecards,
@@ -385,7 +423,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen w-full max-w-[100vw] overflow-x-hidden flex flex-col bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
-      {/* TOP BAR: Clean, zero-overflow mobile header without side APK button */}
+      {/* TOP BAR: Clean, zero-overflow mobile header */}
       <header className="sticky top-0 z-30 h-14 flex items-center justify-between gap-2 px-3 sm:px-6 bg-[#0B192C] text-white border-b border-slate-800 shrink-0 w-full overflow-hidden">
         {/* Zone 1: Menu + Brand Title */}
         <div className="flex items-center gap-2 min-w-0">
@@ -444,17 +482,17 @@ export default function App() {
                 : ''
             }`}
           >
-            {lang === 'hi' ? 'खिलाड़ी प्रबंधन' : 'Players'}
+            {lang === 'hi' ? '8-टीम & 15-खिलाड़ी' : '8 Teams & Players'}
           </button>
           <button
-            onClick={() => handleNavigate('template-library')}
+            onClick={() => handleNavigate('schedule-maker')}
             className={`hover:text-amber-400 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-              activeSection === 'template-library'
+              activeSection === 'schedule-maker'
                 ? 'text-amber-400 underline underline-offset-4'
                 : ''
             }`}
           >
-            {lang === 'hi' ? 'टेम्पलेट्स' : 'Templates'}
+            {lang === 'hi' ? 'FB Live / अखबार / प्रचार' : 'FB Live & News'}
           </button>
         </nav>
 
@@ -587,13 +625,10 @@ export default function App() {
           {activeSection === 'player-list-maker' && (
             <PlayerManagerView
               lang={lang}
-              players={players}
+              teams={teams}
               activeProfile={activeProfile}
-              playerListTemplate={
-                allTemplates.find((t) => t.id === 'tpl-doc-player-list-jale') ||
-                allTemplates[0]
-              }
-              onSavePlayers={handleSavePlayers}
+              templates={allTemplates}
+              onSaveTeams={handleSaveTeams}
               onOpenInEditor={(doc) => {
                 setEditorDoc(doc);
                 setEditorCatFilter('player-list');
@@ -614,6 +649,8 @@ export default function App() {
                   ? 'result'
                   : 'scorecard'
               }
+              teams={teams}
+              sponsors={sponsors}
               schedules={schedules}
               results={results}
               scorecards={scorecards}
@@ -622,6 +659,7 @@ export default function App() {
               onSaveSchedules={handleSaveSchedules}
               onSaveResults={handleSaveResults}
               onSaveScorecards={handleSaveScorecards}
+              onSaveSponsors={handleSaveSponsors}
               onOpenInEditor={(doc) => {
                 setEditorDoc(doc);
                 setEditorCatFilter(doc.category);
@@ -689,8 +727,8 @@ export default function App() {
           {[
             { id: 'dashboard', icon: Home, labelHi: 'होम', labelEn: 'Home' },
             { id: 'poster-maker', icon: Palette, labelHi: 'एडिटर', labelEn: 'Editor' },
-            { id: 'player-list-maker', icon: Users, labelHi: 'खिलाड़ी', labelEn: 'Players' },
-            { id: 'schedule-maker', icon: Calendar, labelHi: 'मैच/स्कोर', labelEn: 'Matches' },
+            { id: 'player-list-maker', icon: Users, labelHi: '8-टीम/खिलाड़ी', labelEn: '8 Teams' },
+            { id: 'schedule-maker', icon: Calendar, labelHi: 'FB Live/न्यूज़', labelEn: 'Live/News' },
             { id: 'template-library', icon: LayoutTemplate, labelHi: 'टेम्पलेट', labelEn: 'Templates' },
           ].map((tab) => {
             const Icon = tab.icon;
@@ -713,7 +751,7 @@ export default function App() {
         </nav>
       )}
 
-      {/* Interactive Ultra-HD Download & Native Share Modal */}
+      {/* Single-Option Ultra-HD Download Modal */}
       <HDExportModal lang={lang} />
 
       {/* Offline Status Toast */}
