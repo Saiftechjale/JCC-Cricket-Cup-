@@ -1,10 +1,11 @@
 import React, { useMemo, useState } from 'react';
 import * as XLSX from 'xlsx';
 import {
+  Check,
   Download,
   Edit3,
-  FileSpreadsheet,
   FileText,
+  Loader2,
   Palette,
   Plus,
   Search,
@@ -19,7 +20,11 @@ import {
   PlayerRecord,
   TournamentProfile,
 } from '../types/studio';
-import { exportPlayersPrintablePDF } from '../utils/exportEngine';
+import {
+  exportDesignDocument,
+  exportExcelWorkbookUniversal,
+  exportPlayersPrintablePDF,
+} from '../utils/exportEngine';
 
 interface PlayerManagerViewProps {
   lang: Language;
@@ -57,6 +62,8 @@ export const PlayerManagerView: React.FC<PlayerManagerViewProps> = ({
   const [formData, setFormData] =
     useState<Omit<PlayerRecord, 'id' | 'createdAt'>>(EMPTY_PLAYER);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [doneAction, setDoneAction] = useState<string | null>(null);
 
   const uniqueTeams = useMemo(() => {
     const set = new Set<string>();
@@ -80,6 +87,53 @@ export const PlayerManagerView: React.FC<PlayerManagerViewProps> = ({
       return matchesTeam && matchesSearch;
     });
   }, [players, teamFilter, searchQuery]);
+
+  const buildCustomizedPlayerListDoc = (): DesignDocument => {
+    const listToFill = filteredPlayers.slice(0, 15);
+    const rows: string[][] = [];
+    for (let i = 0; i < 15; i++) {
+      const pl = listToFill[i];
+      const defaultRole =
+        i === 0
+          ? '(C) / (Batsman) / Bowler'
+          : i === 1
+          ? '(VC) / (Batsman) / Bowler'
+          : i === 2
+          ? '(WK) / (Batsman) / Bowler (All-rounder)'
+          : '(Batsman) / (Bowler) (All-rounder)';
+      rows.push([
+        String(i + 1),
+        pl ? `${pl.playerName} (#${pl.jerseyNumber})` : '',
+        pl ? pl.role : defaultRole,
+      ]);
+    }
+
+    const captain =
+      listToFill.find((p) => p.role.includes('Captain')) || listToFill[0];
+    const teamTitle =
+      teamFilter !== 'ALL'
+        ? teamFilter
+        : captain?.teamName || 'जाले रॉयल इलेवन';
+
+    return {
+      ...playerListTemplate,
+      id: `doc-playerlist-${Date.now()}`,
+      name: `15-Player List — ${teamTitle}`,
+      nameHi: `खिलाड़ियों की सूची एवं शपथ पत्र — ${teamTitle}`,
+      elements: playerListTemplate.elements.map((el) => {
+        if (el.id === 'plf-table') {
+          return { ...el, tableRows: rows };
+        }
+        if (el.id === 'plf-left-team-details') {
+          return {
+            ...el,
+            text: `• टीम का नाम: ${teamTitle}\n• गाँव/शहर: ${captain?.village || 'जाले, दरभंगा'}\n• कप्तान का नाम: ${captain?.playerName || '................................'}\n• मोबाईल नंबर: ${captain?.mobileNumber || activeProfile.contactNumber}\n\nएंट्री फीस (₹): ${activeProfile.entryFee}  स्थिति: [✓] जमा / बाकी\n(नोट: एंट्री फीस में कोई रियायत नहीं, मैच से पहले पूरा भुगतान अनिवार्य)\n\n| विशेष नोट: खेल के दौरान यदि किसी खिलाड़ी को बॉल या बल्ले से चोट लगती है, या खेल भावना के तहत कोई अन्य अनहोनी/दुर्घटना होती है, तो इसके लिए टूर्नामेंट कमिटी या आयोजक मंडल जिम्मेदार नहीं होंगे।`,
+          };
+        }
+        return el;
+      }),
+    };
+  };
 
   const handleOpenAdd = () => {
     setEditingPlayer(null);
@@ -129,22 +183,63 @@ export const PlayerManagerView: React.FC<PlayerManagerViewProps> = ({
     setConfirmDeleteId(null);
   };
 
-  const handleExportExcel = () => {
-    const rows = filteredPlayers.map((p, i) => ({
-      'S.No': i + 1,
-      'Player Name': p.playerName,
-      'Father Name': p.fatherName,
-      'Mobile Number': p.mobileNumber,
-      'Team Name': p.teamName,
-      'Village/City': p.village,
-      'Jersey Number': p.jerseyNumber,
-      Role: p.role,
-      'Registration Status': p.registrationStatus,
-    }));
-    const ws = XLSX.utils.json_to_sheet(rows);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Players');
-    XLSX.writeFile(wb, `Jale_Cricket_Players_${teamFilter}.xlsx`);
+  const handleExportExcel = async () => {
+    setBusyAction('excel');
+    try {
+      const rows = filteredPlayers.map((p, i) => ({
+        'S.No': i + 1,
+        'Player Name': p.playerName,
+        'Father Name': p.fatherName,
+        'Mobile Number': p.mobileNumber,
+        'Team Name': p.teamName,
+        'Village/City': p.village,
+        'Jersey Number': p.jerseyNumber,
+        Role: p.role,
+        'Registration Status': p.registrationStatus,
+      }));
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Players');
+      await exportExcelWorkbookUniversal(
+        wb,
+        `Jale_Cricket_Players_${teamFilter}.xlsx`
+      );
+      setDoneAction('excel');
+      setTimeout(() => setDoneAction(null), 2200);
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const handleExportPDF = async () => {
+    setBusyAction('pdf');
+    try {
+      await exportPlayersPrintablePDF(
+        filteredPlayers,
+        activeProfile,
+        teamFilter
+      );
+      setDoneAction('pdf');
+      setTimeout(() => setDoneAction(null), 2200);
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const handleExportFormImage = async () => {
+    setBusyAction('png');
+    try {
+      const customDoc = buildCustomizedPlayerListDoc();
+      await exportDesignDocument(customDoc, {
+        format: 'png',
+        preset: 'original',
+        scale: 3,
+      });
+      setDoneAction('png');
+      setTimeout(() => setDoneAction(null), 2200);
+    } finally {
+      setBusyAction(null);
+    }
   };
 
   const handleImportExcel = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -160,12 +255,23 @@ export const PlayerManagerView: React.FC<PlayerManagerViewProps> = ({
         const json: Record<string, unknown>[] = XLSX.utils.sheet_to_json(sheet);
         const imported: PlayerRecord[] = json.map((row, idx) => ({
           id: `pl-imp-${Date.now()}-${idx}`,
-          playerName: String(row['Player Name'] || row['Name'] || row['खिलाड़ी का नाम'] || `Player ${idx + 1}`),
+          playerName: String(
+            row['Player Name'] ||
+              row['Name'] ||
+              row['खिलाड़ी का नाम'] ||
+              `Player ${idx + 1}`
+          ),
           fatherName: String(row['Father Name'] || row['पिता का नाम'] || ''),
-          mobileNumber: String(row['Mobile Number'] || row['Mobile'] || row['मोबाइल'] || ''),
-          teamName: String(row['Team Name'] || row['Team'] || row['टीम'] || 'जाले रॉयल इलेवन'),
+          mobileNumber: String(
+            row['Mobile Number'] || row['Mobile'] || row['मोबाइल'] || ''
+          ),
+          teamName: String(
+            row['Team Name'] || row['Team'] || row['टीम'] || 'जाले रॉयल इलेवन'
+          ),
           village: String(row['Village/City'] || row['जाले'] || ''),
-          jerseyNumber: String(row['Jersey Number'] || row['Jersey'] || idx + 1),
+          jerseyNumber: String(
+            row['Jersey Number'] || row['Jersey'] || idx + 1
+          ),
           role: (row['Role'] as PlayerRecord['role']) || 'All-Rounder',
           registrationStatus:
             (row['Registration Status'] as PlayerRecord['registrationStatus']) ||
@@ -184,120 +290,112 @@ export const PlayerManagerView: React.FC<PlayerManagerViewProps> = ({
   };
 
   const handleOpenTeamUndertakingInEditor = () => {
-    const listToFill = filteredPlayers.slice(0, 15);
-    const rows: string[][] = [];
-    for (let i = 0; i < 15; i++) {
-      const pl = listToFill[i];
-      const defaultRole =
-        i === 0
-          ? '(C) / (Batsman) / Bowler'
-          : i === 1
-          ? '(VC) / (Batsman) / Bowler'
-          : i === 2
-          ? '(WK) / (Batsman) / Bowler (All-rounder)'
-          : '(Batsman) / (Bowler) (All-rounder)';
-      rows.push([
-        String(i + 1),
-        pl ? `${pl.playerName} (#${pl.jerseyNumber})` : '',
-        pl ? pl.role : defaultRole,
-      ]);
-    }
-
-    const captain =
-      listToFill.find((p) => p.role.includes('Captain')) || listToFill[0];
-    const teamTitle =
-      teamFilter !== 'ALL'
-        ? teamFilter
-        : captain?.teamName || 'जाले रॉयल इलेवन';
-
-    const customizedDoc: DesignDocument = {
-      ...playerListTemplate,
-      id: `doc-playerlist-${Date.now()}`,
-      name: `15-Player List — ${teamTitle}`,
-      nameHi: `खिलाड़ियों की सूची एवं शपथ पत्र — ${teamTitle}`,
-      elements: playerListTemplate.elements.map((el) => {
-        if (el.id === 'plf-table') {
-          return { ...el, tableRows: rows };
-        }
-        if (el.id === 'plf-left-team-details') {
-          return {
-            ...el,
-            text: `• टीम का नाम: ${teamTitle}\n• गाँव/शहर: ${captain?.village || 'जाले, दरभंगा'}\n• कप्तान का नाम: ${captain?.playerName || '................................'}\n• मोबाईल नंबर: ${captain?.mobileNumber || activeProfile.contactNumber}\n\nएंट्री फीस (₹): ${activeProfile.entryFee}  स्थिति: [✓] जमा / बाकी\n(नोट: एंट्री फीस में कोई रियायत नहीं, मैच से पहले पूरा भुगतान अनिवार्य)\n\n| विशेष नोट: खेल के दौरान यदि किसी खिलाड़ी को बॉल या बल्ले से चोट लगती है, या खेल भावना के तहत कोई अन्य अनहोनी/दुर्घटना होती है, तो इसके लिए टूर्नामेंट कमिटी या आयोजक मंडल जिम्मेदार नहीं होंगे।`,
-          };
-        }
-        return el;
-      }),
-    };
-
-    onOpenInEditor(customizedDoc);
+    onOpenInEditor(buildCustomizedPlayerListDoc());
   };
 
   return (
-    <div className="max-w-7xl mx-auto p-4 sm:p-6 space-y-6">
+    <div className="w-full max-w-7xl mx-auto px-3 sm:px-6 py-4 sm:py-6 space-y-5 overflow-x-hidden">
       {/* Header & Action Buttons */}
-      <div className="rounded-2xl bg-slate-900 text-white p-5 sm:p-6 border border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-        <div className="space-y-1">
+      <div className="rounded-2xl bg-slate-900 text-white p-4 sm:p-6 border border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        <div className="space-y-1 min-w-0">
           <div className="flex items-center gap-2 text-amber-400 text-xs font-bold">
-            <Users className="w-4 h-4" />
-            <span>
+            <Users className="w-4 h-4 shrink-0" />
+            <span className="truncate">
               {lang === 'hi'
                 ? 'खिलाड़ी पंजीकरण एवं टीम शपथ पत्र प्रबंधन'
                 : 'Player Registration & Team Undertaking Management'}
             </span>
           </div>
-          <h2 className="text-xl sm:text-2xl font-extrabold">
+          <h2 className="text-lg sm:text-2xl font-extrabold break-words">
             {lang === 'hi'
               ? 'खिलाड़ियों की सूची (Player List & Team Roster)'
               : 'Tournament Player Roster & Undertaking Form'}
           </h2>
           <p className="text-xs sm:text-sm text-slate-300">
             {lang === 'hi'
-              ? 'खिलाड़ियों का रिकॉर्ड जोड़ें, टीम के अनुसार फिल्टर करें, Excel इम्पोर्ट/एक्सपोर्ट करें या सीधे 15-खिलाड़ियों वाला शपथ पत्र प्रिंट करें।'
-              : 'Manage player registrations, filter by team, import/export Excel sheets, or generate the printable 15-player undertaking form.'}
+              ? 'खिलाड़ियों का रिकॉर्ड जोड़ें, टीम के अनुसार फिल्टर करें, या सीधे 15-खिलाड़ियों वाला शपथ पत्र HD PDF / PNG में डाउनलोड करें।'
+              : 'Manage player registrations, filter by team, or download the 15-player undertaking form in HD PDF / PNG.'}
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2">
           <button
             onClick={handleOpenAdd}
-            className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs cursor-pointer"
+            className="flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs cursor-pointer shadow-sm"
           >
-            <Plus className="w-4 h-4" />
+            <Plus className="w-4 h-4 shrink-0" />
             <span>{lang === 'hi' ? 'नया खिलाड़ी जोड़ें' : 'Add Player'}</span>
           </button>
 
           <button
             onClick={handleOpenTeamUndertakingInEditor}
-            className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs cursor-pointer"
+            className="flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs cursor-pointer shadow-sm"
           >
-            <Palette className="w-4 h-4" />
+            <Palette className="w-4 h-4 shrink-0" />
             <span>
-              {lang === 'hi'
-                ? '15-खिलाड़ी शपथ पत्र डिज़ाइन खोलें'
-                : 'Open 15-Player Form in Editor'}
+              {lang === 'hi' ? 'शपथ पत्र एडिटर' : 'Edit 15-Player Form'}
             </span>
           </button>
 
           <button
-            onClick={() =>
-              exportPlayersPrintablePDF(filteredPlayers, activeProfile, teamFilter)
-            }
-            className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold text-xs cursor-pointer"
+            onClick={handleExportPDF}
+            disabled={busyAction !== null}
+            className="flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold text-xs cursor-pointer shadow-sm"
           >
-            <FileText className="w-4 h-4" />
-            <span>{lang === 'hi' ? 'प्रिंटेबल PDF डाउनलोड' : 'Printable List PDF'}</span>
+            {busyAction === 'pdf' ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : doneAction === 'pdf' ? (
+              <Check className="w-4 h-4" />
+            ) : (
+              <FileText className="w-4 h-4 shrink-0" />
+            )}
+            <span>
+              {doneAction === 'pdf'
+                ? '✓ HD PDF Ready!'
+                : lang === 'hi'
+                ? 'HD PDF डाउनलोड'
+                : 'HD List PDF'}
+            </span>
+          </button>
+
+          <button
+            onClick={handleExportFormImage}
+            disabled={busyAction !== null}
+            className="flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs cursor-pointer shadow-sm"
+          >
+            {busyAction === 'png' ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : doneAction === 'png' ? (
+              <Check className="w-4 h-4" />
+            ) : (
+              <Download className="w-4 h-4 shrink-0" />
+            )}
+            <span>
+              {doneAction === 'png'
+                ? '✓ HD PNG Ready!'
+                : lang === 'hi'
+                ? '15-खिलाड़ी HD PNG'
+                : '15-Player HD PNG'}
+            </span>
           </button>
 
           <button
             onClick={handleExportExcel}
-            className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs border border-slate-700 cursor-pointer"
+            disabled={busyAction !== null}
+            className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs border border-slate-700 cursor-pointer"
           >
-            <Download className="w-4 h-4" />
-            <span>Excel Export</span>
+            {busyAction === 'excel' ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : doneAction === 'excel' ? (
+              <Check className="w-4 h-4 text-emerald-400" />
+            ) : (
+              <Download className="w-4 h-4 shrink-0" />
+            )}
+            <span>{doneAction === 'excel' ? '✓ Excel Ready' : 'Excel Export'}</span>
           </button>
 
-          <label className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs border border-slate-700 cursor-pointer">
-            <Upload className="w-4 h-4" />
+          <label className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs border border-slate-700 cursor-pointer">
+            <Upload className="w-4 h-4 shrink-0" />
             <span>Excel Import</span>
             <input
               type="file"
@@ -310,8 +408,8 @@ export const PlayerManagerView: React.FC<PlayerManagerViewProps> = ({
       </div>
 
       {/* Search & Team Filter Bar */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800">
-        <div className="relative flex-1">
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white dark:bg-slate-900 p-3.5 sm:p-4 rounded-2xl border border-slate-200 dark:border-slate-800">
+        <div className="relative flex-1 min-w-0">
           <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
           <input
             type="text"
@@ -326,17 +424,19 @@ export const PlayerManagerView: React.FC<PlayerManagerViewProps> = ({
           />
         </div>
 
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-bold text-slate-500 whitespace-nowrap">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-xs font-bold text-slate-500 whitespace-nowrap shrink-0">
             {lang === 'hi' ? 'टीम फिल्टर:' : 'Filter Team:'}
           </span>
           <select
             value={teamFilter}
             onChange={(e) => setTeamFilter(e.target.value)}
-            className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-bold text-slate-900 dark:text-white"
+            className="w-full sm:w-auto min-w-0 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-bold text-slate-900 dark:text-white truncate"
           >
             <option value="ALL">
-              {lang === 'hi' ? `सभी टीमें (${players.length})` : `All Teams (${players.length})`}
+              {lang === 'hi'
+                ? `सभी टीमें (${players.length})`
+                : `All Teams (${players.length})`}
             </option>
             {uniqueTeams.map((t) => (
               <option key={t} value={t}>
@@ -350,7 +450,7 @@ export const PlayerManagerView: React.FC<PlayerManagerViewProps> = ({
       {/* Players Data Table */}
       <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+          <table className="w-full text-left border-collapse min-w-[680px]">
             <thead>
               <tr className="bg-slate-900 text-white text-xs uppercase">
                 <th className="py-3.5 px-4 font-bold">#</th>
@@ -454,7 +554,7 @@ export const PlayerManagerView: React.FC<PlayerManagerViewProps> = ({
       {/* Add / Edit Player Modal */}
       {showFormModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
-          <div className="w-full max-w-lg rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-6 shadow-2xl">
+          <div className="w-full max-w-lg rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 sm:p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800">
               <h3 className="text-base font-extrabold text-slate-900 dark:text-white">
                 {editingPlayer
@@ -610,7 +710,7 @@ export const PlayerManagerView: React.FC<PlayerManagerViewProps> = ({
                   type="submit"
                   className="px-5 py-2 rounded-xl bg-slate-900 dark:bg-amber-500 text-white dark:text-slate-950 text-xs font-extrabold cursor-pointer"
                 >
-                  {lang === 'hi' ? 'सेव करें' : 'Save Player'}
+                  {lang === 'hi' ? '✓ सेव करें' : '✓ Save Player'}
                 </button>
               </div>
             </form>

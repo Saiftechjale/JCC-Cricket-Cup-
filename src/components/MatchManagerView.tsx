@@ -344,47 +344,49 @@ export const MatchManagerView: React.FC<MatchManagerViewProps> = ({
 
           {/* Schedule Table */}
           <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-slate-900 text-white text-xs uppercase">
-                  <th className="py-3.5 px-4">मैच #</th>
-                  <th className="py-3.5 px-4">चरण (Stage)</th>
-                  <th className="py-3.5 px-4">मुकाबला (Team A vs Team B)</th>
-                  <th className="py-3.5 px-4">दिनांक एवं समय</th>
-                  <th className="py-3.5 px-4">स्थान (Venue)</th>
-                  <th className="py-3.5 px-4 text-right">एक्शन</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-sm">
-                {schedules.map((s) => (
-                  <tr key={s.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
-                    <td className="py-3 px-4 font-mono font-bold tabular-nums">
-                      #{s.matchNumber}
-                    </td>
-                    <td className="py-3 px-4 font-bold text-amber-600 dark:text-amber-400">
-                      {s.stage}
-                    </td>
-                    <td className="py-3 px-4 font-extrabold text-slate-900 dark:text-white">
-                      {s.teamA} <span className="text-red-600 mx-1">VS</span> {s.teamB}
-                    </td>
-                    <td className="py-3 px-4 font-semibold text-slate-600 dark:text-slate-300 tabular-nums">
-                      {s.matchDate} · {s.matchTime}
-                    </td>
-                    <td className="py-3 px-4 text-xs text-slate-500">{s.venue}</td>
-                    <td className="py-3 px-4 text-right">
-                      <button
-                        onClick={() =>
-                          onSaveSchedules(schedules.filter((item) => item.id !== s.id))
-                        }
-                        className="p-1.5 rounded-lg text-red-600 hover:bg-red-50 cursor-pointer"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </td>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse min-w-[640px]">
+                <thead>
+                  <tr className="bg-slate-900 text-white text-xs uppercase">
+                    <th className="py-3.5 px-4">मैच #</th>
+                    <th className="py-3.5 px-4">चरण (Stage)</th>
+                    <th className="py-3.5 px-4">मुकाबला (Team A vs Team B)</th>
+                    <th className="py-3.5 px-4">दिनांक एवं समय</th>
+                    <th className="py-3.5 px-4">स्थान (Venue)</th>
+                    <th className="py-3.5 px-4 text-right">एक्शन</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-sm">
+                  {schedules.map((s) => (
+                    <tr key={s.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                      <td className="py-3 px-4 font-mono font-bold tabular-nums">
+                        #{s.matchNumber}
+                      </td>
+                      <td className="py-3 px-4 font-bold text-amber-600 dark:text-amber-400">
+                        {s.stage}
+                      </td>
+                      <td className="py-3 px-4 font-extrabold text-slate-900 dark:text-white">
+                        {s.teamA} <span className="text-red-600 mx-1">VS</span> {s.teamB}
+                      </td>
+                      <td className="py-3 px-4 font-semibold text-slate-600 dark:text-slate-300 tabular-nums">
+                        {s.matchDate} · {s.matchTime}
+                      </td>
+                      <td className="py-3 px-4 text-xs text-slate-500">{s.venue}</td>
+                      <td className="py-3 px-4 text-right">
+                        <button
+                          onClick={() =>
+                            onSaveSchedules(schedules.filter((item) => item.id !== s.id))
+                          }
+                          className="p-1.5 rounded-lg text-red-600 hover:bg-red-50 cursor-pointer"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}

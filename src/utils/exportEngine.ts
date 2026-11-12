@@ -1,4 +1,8 @@
+import { Capacitor } from '@capacitor/core';
+import { Directory, Filesystem } from '@capacitor/filesystem';
+import { Share } from '@capacitor/share';
 import { jsPDF } from 'jspdf';
+import * as XLSX from 'xlsx';
 import {
   CanvasElement,
   DesignDocument,
@@ -30,12 +34,43 @@ export interface ExportOptions {
   filename?: string;
 }
 
+export interface ExportResultPayload {
+  filename: string;
+  format: 'pdf' | 'png' | 'jpg' | 'xlsx';
+  previewDataUrl?: string;
+  blobUrl?: string;
+  nativeUri?: string;
+  width?: number;
+  height?: number;
+}
+
+function emitExportSuccess(payload: ExportResultPayload) {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent<ExportResultPayload>('jale-export-success', {
+        detail: payload,
+      })
+    );
+  }
+}
+
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => resolve(img);
-    img.onerror = (err) => reject(err);
+    if (src.startsWith('http://') || src.startsWith('https://')) {
+      img.crossOrigin = 'anonymous';
+    }
+    const timer = setTimeout(() => {
+      reject(new Error('Image load timeout'));
+    }, 5000);
+    img.onload = () => {
+      clearTimeout(timer);
+      resolve(img);
+    };
+    img.onerror = (err) => {
+      clearTimeout(timer);
+      reject(err);
+    };
     img.src = src;
   });
 }
@@ -108,7 +143,10 @@ async function renderElementToCanvas(
     ctx.shadowBlur = el.shadowBlur;
   }
 
-  const radius = el.type === 'circle' ? Math.min(el.width, el.height) / 2 : el.borderRadius || 0;
+  const radius =
+    el.type === 'circle'
+      ? Math.min(el.width, el.height) / 2
+      : el.borderRadius || 0;
 
   // Background & Border for shapes and text boxes
   if (
@@ -146,12 +184,13 @@ async function renderElementToCanvas(
     ctx.stroke();
   }
 
-  // Image or Sticker
+  // Image or Sticker (prioritize custom uploaded imageUrl over default stickerId)
   if (el.type === 'image' || el.type === 'sticker') {
     const src =
-      el.type === 'sticker' && el.stickerId
+      el.imageUrl ||
+      (el.type === 'sticker' && el.stickerId
         ? getStickerDataUrl(el.stickerId)
-        : el.imageUrl;
+        : undefined);
     if (src) {
       try {
         const img = await loadImage(src);
@@ -266,8 +305,15 @@ export async function renderDesignToCanvas(
   doc: DesignDocument,
   options: ExportOptions
 ): Promise<HTMLCanvasElement> {
-  if (document.fonts && document.fonts.ready) {
-    await document.fonts.ready;
+  if (typeof document !== 'undefined' && document.fonts && document.fonts.ready) {
+    try {
+      await Promise.race([
+        document.fonts.ready,
+        new Promise((res) => setTimeout(res, 1500)),
+      ]);
+    } catch {
+      // ignore font wait errors
+    }
   }
 
   let targetW = doc.width;
@@ -282,18 +328,28 @@ export async function renderDesignToCanvas(
   } else if (options.preset === 'Instagram-Story') {
     targetW = 1080;
     targetH = 1920;
-  } else if (options.preset === 'Custom' && options.customWidth && options.customHeight) {
+  } else if (
+    options.preset === 'Custom' &&
+    options.customWidth &&
+    options.customHeight
+  ) {
     targetW = options.customWidth;
     targetH = options.customHeight;
   }
 
-  const scale = options.scale || 2;
+  // Default to Ultra-HD 3x supersampling while staying within mobile GPU limits
+  const requestedScale = options.scale || 3;
+  const maxDim = Math.max(targetW, targetH);
+  const safeScale = Math.max(2, Math.min(requestedScale, Math.floor(3840 / maxDim)));
+
   const canvas = document.createElement('canvas');
-  canvas.width = targetW * scale;
-  canvas.height = targetH * scale;
+  canvas.width = Math.round(targetW * safeScale);
+  canvas.height = Math.round(targetH * safeScale);
 
   const ctx = canvas.getContext('2d')!;
-  ctx.scale(scale, scale);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.scale(safeScale, safeScale);
 
   // Fill background
   ctx.fillStyle = doc.backgroundColor || '#FFFFFF';
@@ -355,79 +411,206 @@ export async function renderDesignToCanvas(
   return canvas;
 }
 
+function dataUrlToBlob(dataUrl: string): Blob {
+  const parts = dataUrl.split(',');
+  const mimeMatch = parts[0].match(/:(.*?);/);
+  const mime = mimeMatch ? mimeMatch[1] : 'application/octet-stream';
+  const bstr = atob(parts[1]);
+  let n = bstr.length;
+  const u8arr = new Uint8Array(n);
+  while (n--) {
+    u8arr[n] = bstr.charCodeAt(n);
+  }
+  return new Blob([u8arr], { type: mime });
+}
+
+async function saveFileUniversal(params: {
+  fullFilename: string;
+  format: 'pdf' | 'png' | 'jpg' | 'xlsx';
+  base64Data: string; // pure base64 without data:... prefix
+  blob: Blob;
+  previewDataUrl?: string;
+  width?: number;
+  height?: number;
+}): Promise<void> {
+  const { fullFilename, format, base64Data, blob, previewDataUrl, width, height } =
+    params;
+
+  let nativeUri: string | undefined;
+
+  // 1. If running inside Android Capacitor APK, write directly to device storage
+  if (Capacitor.isNativePlatform()) {
+    try {
+      const saved = await Filesystem.writeFile({
+        path: fullFilename,
+        data: base64Data,
+        directory: Directory.Documents,
+        recursive: true,
+      });
+      nativeUri = saved.uri;
+    } catch {
+      try {
+        const savedCache = await Filesystem.writeFile({
+          path: fullFilename,
+          data: base64Data,
+          directory: Directory.Cache,
+          recursive: true,
+        });
+        nativeUri = savedCache.uri;
+      } catch (cacheErr) {
+        console.warn('Capacitor Filesystem write fallback:', cacheErr);
+      }
+    }
+  }
+
+  // 2. Create Blob URL and trigger standard browser download if supported
+  const blobUrl = URL.createObjectURL(blob);
+  if (!Capacitor.isNativePlatform()) {
+    try {
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = fullFilename;
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      link.click();
+      setTimeout(() => {
+        if (link.parentNode) document.body.removeChild(link);
+      }, 400);
+    } catch (err) {
+      console.warn('Browser anchor download warning:', err);
+    }
+  }
+
+  // 3. Emit global event so the HD Export Modal opens with Preview + 1-Tap Save/Share
+  emitExportSuccess({
+    filename: fullFilename,
+    format,
+    previewDataUrl,
+    blobUrl,
+    nativeUri,
+    width,
+    height,
+  });
+
+  // 4. On native Android APK, also trigger native Share/Save dialog automatically
+  if (Capacitor.isNativePlatform() && nativeUri) {
+    try {
+      await Share.share({
+        title: fullFilename,
+        text: `${fullFilename} — Jale Cricket Studio HD Export`,
+        url: nativeUri,
+        dialogTitle: 'Save or Share HD File',
+      });
+    } catch {
+      // User dismissed native share sheet; modal is still visible on screen
+    }
+  }
+}
+
 export async function exportDesignDocument(
   doc: DesignDocument,
   options: ExportOptions
 ): Promise<void> {
-  const canvas = await renderDesignToCanvas(doc, options);
-  const safeName = (options.filename || doc.name || 'jale-cricket-design')
+  const effectiveOptions: ExportOptions = {
+    ...options,
+    scale: options.scale || 3,
+  };
+  const canvas = await renderDesignToCanvas(doc, effectiveOptions);
+  const rawName = (options.filename || doc.name || 'Jale_Cricket_Cup_HD')
     .replace(/[^a-zA-Z0-9\u0900-\u097F_-]/g, '_')
+    .replace(/_+/g, '_')
     .slice(0, 60);
+  const safeName = rawName || 'Jale_Cricket_Design';
+
+  const previewDataUrl = canvas.toDataURL('image/jpeg', 0.92);
 
   if (options.format === 'png' || options.format === 'jpg') {
     const mime = options.format === 'png' ? 'image/png' : 'image/jpeg';
-    const dataUrl = canvas.toDataURL(mime, 0.96);
-    const link = document.createElement('a');
-    link.download = `${safeName}.${options.format}`;
-    link.href = dataUrl;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const dataUrl = canvas.toDataURL(mime, 0.98);
+    const base64Data = dataUrl.split(',')[1];
+    const blob = dataUrlToBlob(dataUrl);
+    const fullFilename = `${safeName}.${options.format}`;
+
+    await saveFileUniversal({
+      fullFilename,
+      format: options.format,
+      base64Data,
+      blob,
+      previewDataUrl: dataUrl,
+      width: canvas.width,
+      height: canvas.height,
+    });
     return;
   }
 
   // PDF Export via jsPDF preserving Hindi & English fonts via high-DPI image layer
-  const imgData = canvas.toDataURL('image/jpeg', 0.96);
+  const imgData = canvas.toDataURL('image/jpeg', 0.98);
   const isLandscape =
     options.preset === 'A4-Landscape' ||
     options.preset === 'A5-Landscape' ||
     (options.preset === 'original' && canvas.width > canvas.height);
 
-  let pdfFormat: string | [number, number] = 'a4';
-  if (options.preset === 'A5-Portrait' || options.preset === 'A5-Landscape') {
-    pdfFormat = 'a5';
-  } else if (options.preset === 'original' || options.preset === 'Custom') {
-    // Exact custom page size in pt so zero white margins occur
-    const ptW = (canvas.width / (options.scale || 2)) * 0.75;
-    const ptH = (canvas.height / (options.scale || 2)) * 0.75;
-    const pdf = new jsPDF({
+  let pdf: jsPDF;
+
+  if (options.preset === 'original' || options.preset === 'Custom') {
+    const ptW = doc.width * 0.75;
+    const ptH = doc.height * 0.75;
+    pdf = new jsPDF({
       orientation: ptW > ptH ? 'landscape' : 'portrait',
       unit: 'pt',
       format: [ptW, ptH],
+      compress: true,
     });
-    pdf.addImage(imgData, 'JPEG', 0, 0, ptW, ptH);
-    pdf.save(`${safeName}.pdf`);
-    return;
-  }
-
-  const pdf = new jsPDF({
-    orientation: isLandscape ? 'landscape' : 'portrait',
-    unit: 'mm',
-    format: pdfFormat,
-  });
-
-  const pageW = pdf.internal.pageSize.getWidth();
-  const pageH = pdf.internal.pageSize.getHeight();
-  const imgRatio = canvas.width / canvas.height;
-  const pageRatio = pageW / pageH;
-
-  let renderW = pageW;
-  let renderH = pageH;
-  let offsetX = 0;
-  let offsetY = 0;
-
-  if (imgRatio > pageRatio) {
-    renderW = pageW;
-    renderH = pageW / imgRatio;
-    offsetY = (pageH - renderH) / 2;
+    pdf.addImage(imgData, 'JPEG', 0, 0, ptW, ptH, undefined, 'FAST');
   } else {
-    renderH = pageH;
-    renderW = pageH * imgRatio;
-    offsetX = (pageW - renderW) / 2;
+    const pdfFormat =
+      options.preset === 'A5-Portrait' || options.preset === 'A5-Landscape'
+        ? 'a5'
+        : 'a4';
+    pdf = new jsPDF({
+      orientation: isLandscape ? 'landscape' : 'portrait',
+      unit: 'mm',
+      format: pdfFormat,
+      compress: true,
+    });
+
+    const pageW = pdf.internal.pageSize.getWidth();
+    const pageH = pdf.internal.pageSize.getHeight();
+    const imgRatio = canvas.width / canvas.height;
+    const pageRatio = pageW / pageH;
+
+    let renderW = pageW;
+    let renderH = pageH;
+    let offsetX = 0;
+    let offsetY = 0;
+
+    if (imgRatio > pageRatio) {
+      renderW = pageW;
+      renderH = pageW / imgRatio;
+      offsetY = (pageH - renderH) / 2;
+    } else {
+      renderH = pageH;
+      renderW = pageH * imgRatio;
+      offsetX = (pageW - renderW) / 2;
+    }
+
+    pdf.addImage(imgData, 'JPEG', offsetX, offsetY, renderW, renderH, undefined, 'FAST');
   }
 
-  pdf.addImage(imgData, 'JPEG', offsetX, offsetY, renderW, renderH);
-  pdf.save(`${safeName}.pdf`);
+  const pdfDataUri = pdf.output('datauristring');
+  const pdfBase64 = pdfDataUri.split(',')[1];
+  const pdfBlob = pdf.output('blob');
+  const fullFilename = `${safeName}.pdf`;
+
+  await saveFileUniversal({
+    fullFilename,
+    format: 'pdf',
+    base64Data: pdfBase64,
+    blob: pdfBlob,
+    previewDataUrl,
+    width: canvas.width,
+    height: canvas.height,
+  });
 }
 
 export async function shareDesignDocument(doc: DesignDocument): Promise<boolean> {
@@ -435,28 +618,80 @@ export async function shareDesignDocument(doc: DesignDocument): Promise<boolean>
     const canvas = await renderDesignToCanvas(doc, {
       format: 'png',
       preset: 'original',
-      scale: 2,
+      scale: 3,
     });
-    const blob: Blob | null = await new Promise((res) =>
-      canvas.toBlob((b) => res(b), 'image/png', 0.95)
+    const dataUrl = canvas.toDataURL('image/png', 0.98);
+    const base64Data = dataUrl.split(',')[1];
+    const safeName = (doc.name || 'Jale_Cricket_Design').replace(
+      /[^a-zA-Z0-9\u0900-\u097F_-]/g,
+      '_'
     );
-    if (!blob) return false;
-    const file = new File([blob], `${doc.name || 'jale-cricket'}.png`, {
-      type: 'image/png',
-    });
+    const fullFilename = `${safeName}.png`;
+
+    if (Capacitor.isNativePlatform()) {
+      const saved = await Filesystem.writeFile({
+        path: fullFilename,
+        data: base64Data,
+        directory: Directory.Cache,
+      });
+      await Share.share({
+        title: doc.nameHi || doc.name,
+        text: `${doc.nameHi || doc.name} — Jale Cricket Studio`,
+        url: saved.uri,
+        dialogTitle: 'Share HD Design',
+      });
+      return true;
+    }
+
+    const blob = dataUrlToBlob(dataUrl);
+    const file = new File([blob], fullFilename, { type: 'image/png' });
     if (navigator.canShare && navigator.canShare({ files: [file] })) {
       await navigator.share({
         title: doc.nameHi || doc.name,
-        text: `${doc.nameHi} — Created with Jale Cricket Studio`,
+        text: `${doc.nameHi || doc.name} — Created with Jale Cricket Studio`,
         files: [file],
       });
       return true;
     }
-    return false;
+
+    // Fallback: trigger universal save modal
+    await saveFileUniversal({
+      fullFilename,
+      format: 'png',
+      base64Data,
+      blob,
+      previewDataUrl: dataUrl,
+      width: canvas.width,
+      height: canvas.height,
+    });
+    return true;
   } catch (err) {
-    console.warn('Share cancelled or unsupported:', err);
+    console.warn('Share cancelled or fallback used:', err);
     return false;
   }
+}
+
+export async function exportExcelWorkbookUniversal(
+  wb: XLSX.WorkBook,
+  filename: string
+): Promise<void> {
+  const fullFilename = filename.endsWith('.xlsx') ? filename : `${filename}.xlsx`;
+  const base64Data = XLSX.write(wb, { bookType: 'xlsx', type: 'base64' });
+  const binaryStr = atob(base64Data);
+  const bytes = new Uint8Array(binaryStr.length);
+  for (let i = 0; i < binaryStr.length; i++) {
+    bytes[i] = binaryStr.charCodeAt(i);
+  }
+  const blob = new Blob([bytes], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  });
+
+  await saveFileUniversal({
+    fullFilename,
+    format: 'xlsx',
+    base64Data,
+    blob,
+  });
 }
 
 /**
@@ -465,7 +700,8 @@ export async function shareDesignDocument(doc: DesignDocument): Promise<boolean>
 export async function exportPlayersPrintablePDF(
   players: PlayerRecord[],
   profile: TournamentProfile,
-  teamFilter?: string
+  teamFilter?: string,
+  format: 'pdf' | 'png' | 'jpg' = 'pdf'
 ): Promise<void> {
   const doc: DesignDocument = {
     id: 'temp-players-pdf',
@@ -509,7 +745,9 @@ export async function exportPlayersPrintablePDF(
         rotation: 0,
         opacity: 1,
         locked: false,
-        text: `पंजीकृत खिलाड़ियों की सूची ${teamFilter && teamFilter !== 'ALL' ? `— टीम: ${teamFilter}` : '(सभी टीमें)'}`,
+        text: `पंजीकृत खिलाड़ियों की सूची ${
+          teamFilter && teamFilter !== 'ALL' ? `— टीम: ${teamFilter}` : '(सभी टीमें)'
+        }`,
         fontFamily: 'Noto Sans Devanagari',
         fontSize: 21,
         fontWeight: '800',
@@ -533,7 +771,15 @@ export async function exportPlayersPrintablePDF(
         headerTextColor: '#FDE047',
         borderColor: '#334155',
         fontSize: 15,
-        tableHeaders: ['क्र०', 'खिलाड़ी का नाम', 'पिता का नाम', 'टीम का नाम', 'भूमिका (Role)', 'मोबाइल', 'स्थिति'],
+        tableHeaders: [
+          'क्र०',
+          'खिलाड़ी का नाम',
+          'पिता का नाम',
+          'टीम का नाम',
+          'भूमिका (Role)',
+          'मोबाइल',
+          'स्थिति',
+        ],
         tableRows: players.slice(0, 20).map((pl, idx) => [
           String(idx + 1),
           pl.playerName,
@@ -565,16 +811,17 @@ export async function exportPlayersPrintablePDF(
   };
 
   await exportDesignDocument(doc, {
-    format: 'pdf',
-    preset: 'A4-Portrait',
-    scale: 2,
+    format,
+    preset: format === 'pdf' ? 'A4-Portrait' : 'original',
+    scale: 3,
     filename: `Jale_Player_List_${teamFilter || 'All'}`,
   });
 }
 
 export async function exportSchedulesPrintablePDF(
   schedules: MatchScheduleRecord[],
-  profile: TournamentProfile
+  profile: TournamentProfile,
+  format: 'pdf' | 'png' | 'jpg' = 'pdf'
 ): Promise<void> {
   const doc: DesignDocument = {
     id: 'temp-schedule-pdf',
@@ -622,7 +869,14 @@ export async function exportSchedulesPrintablePDF(
         headerTextColor: '#FDE047',
         borderColor: '#1E3A8A',
         fontSize: 16,
-        tableHeaders: ['मैच नं०', 'चरण (Stage)', 'टीम A', 'टीम B', 'दिनांक व समय', 'मैदान (Venue)'],
+        tableHeaders: [
+          'मैच नं०',
+          'चरण (Stage)',
+          'टीम A',
+          'टीम B',
+          'दिनांक व समय',
+          'मैदान (Venue)',
+        ],
         tableRows: schedules.map((s) => [
           `मैच #${s.matchNumber}`,
           s.stage,
@@ -653,16 +907,17 @@ export async function exportSchedulesPrintablePDF(
   };
 
   await exportDesignDocument(doc, {
-    format: 'pdf',
-    preset: 'A4-Portrait',
-    scale: 2,
+    format,
+    preset: format === 'pdf' ? 'A4-Portrait' : 'original',
+    scale: 3,
     filename: 'Jale_Cricket_Match_Schedule',
   });
 }
 
 export async function exportResultCardPDF(
   res: MatchResultRecord,
-  profile: TournamentProfile
+  profile: TournamentProfile,
+  format: 'pdf' | 'png' | 'jpg' = 'pdf'
 ): Promise<void> {
   const doc: DesignDocument = {
     id: 'temp-result-pdf',
@@ -782,19 +1037,21 @@ export async function exportResultCardPDF(
   };
 
   await exportDesignDocument(doc, {
-    format: 'pdf',
-    preset: 'A4-Portrait',
-    scale: 2,
+    format,
+    preset: format === 'pdf' ? 'A4-Portrait' : 'original',
+    scale: 3,
     filename: `Jale_Match_${res.matchNumber}_Result`,
   });
 }
 
 export async function exportScorecardPrintablePDF(
   sc: ScorecardRecord,
-  profile: TournamentProfile
+  profile: TournamentProfile,
+  format: 'pdf' | 'png' | 'jpg' = 'pdf'
 ): Promise<void> {
   const totalRuns =
-    sc.batsmen.reduce((sum, b) => sum + Number(b.runs || 0), 0) + Number(sc.extras || 0);
+    sc.batsmen.reduce((sum, b) => sum + Number(b.runs || 0), 0) +
+    Number(sc.extras || 0);
 
   const doc: DesignDocument = {
     id: 'temp-scorecard-pdf',
@@ -862,7 +1119,15 @@ export async function exportScorecardPrintablePDF(
         headerTextColor: '#FDE047',
         borderColor: '#334155',
         fontSize: 16,
-        tableHeaders: ['बल्लेबाज (Batsman)', 'आउट विवरण (Dismissal)', 'रन (R)', 'गेंद (B)', '4s', '6s', 'SR'],
+        tableHeaders: [
+          'बल्लेबाज (Batsman)',
+          'आउट विवरण (Dismissal)',
+          'रन (R)',
+          'गेंद (B)',
+          '4s',
+          '6s',
+          'SR',
+        ],
         tableRows: [
           ...sc.batsmen.map((b) => [
             b.name,
@@ -874,7 +1139,15 @@ export async function exportScorecardPrintablePDF(
             b.balls > 0 ? ((b.runs / b.balls) * 100).toFixed(1) : '0.0',
           ]),
           ['अतिरिक्त (Extras)', '-', String(sc.extras), '-', '-', '-', '-'],
-          ['कुल स्कोर (TOTAL)', `${sc.totalOvers} Overs`, `${totalRuns}/${sc.totalWickets}`, '-', '-', '-', '-'],
+          [
+            'कुल स्कोर (TOTAL)',
+            `${sc.totalOvers} Overs`,
+            `${totalRuns}/${sc.totalWickets}`,
+            '-',
+            '-',
+            '-',
+            '-',
+          ],
         ],
       },
       {
@@ -891,14 +1164,23 @@ export async function exportScorecardPrintablePDF(
         headerTextColor: '#FFFFFF',
         borderColor: '#334155',
         fontSize: 16,
-        tableHeaders: ['गेंदबाज (Bowler)', 'ओवर (O)', 'मेडन (M)', 'रन (R)', 'विकेट (W)', 'इकोनॉमी (Econ)'],
+        tableHeaders: [
+          'गेंदबाज (Bowler)',
+          'ओवर (O)',
+          'मेडन (M)',
+          'रन (R)',
+          'विकेट (W)',
+          'इकोनॉमी (Econ)',
+        ],
         tableRows: sc.bowlers.map((bw) => [
           bw.name,
           bw.overs,
           String(bw.maidens),
           String(bw.runsConceded),
           String(bw.wickets),
-          parseFloat(bw.overs) > 0 ? (bw.runsConceded / parseFloat(bw.overs)).toFixed(2) : '0.00',
+          parseFloat(bw.overs) > 0
+            ? (bw.runsConceded / parseFloat(bw.overs)).toFixed(2)
+            : '0.00',
         ]),
       },
       {
@@ -926,9 +1208,9 @@ export async function exportScorecardPrintablePDF(
   };
 
   await exportDesignDocument(doc, {
-    format: 'pdf',
-    preset: 'A4-Portrait',
-    scale: 2,
+    format,
+    preset: format === 'pdf' ? 'A4-Portrait' : 'original',
+    scale: 3,
     filename: `Jale_Scorecard_Match_${sc.matchNumber}`,
   });
 }

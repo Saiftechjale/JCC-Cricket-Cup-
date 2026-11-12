@@ -3488,11 +3488,11 @@ export function buildMasterTemplates(profile: TournamentProfile): DesignDocument
     },
   ];
 
-  return templates;
+  return templates.map((t) => syncProfileToDesign(t, p));
 }
 
 /**
- * Dynamically replaces tournament profile fields in a design document
+ * Dynamically replaces tournament profile fields, official logo, and signature in a design document
  */
 export function syncProfileToDesign(
   doc: DesignDocument,
@@ -3501,7 +3501,25 @@ export function syncProfileToDesign(
   const updatedElements = doc.elements.map((el) => {
     const copy = { ...el };
     if (copy.bindField && profile[copy.bindField]) {
-      copy.text = String(profile[copy.bindField]);
+      if (copy.bindField === 'tournamentLogo') {
+        copy.imageUrl = String(profile.tournamentLogo);
+      } else if (copy.bindField === 'signatureImage') {
+        copy.imageUrl = String(profile.signatureImage);
+      } else {
+        copy.text = String(profile[copy.bindField]);
+      }
+    }
+    if (
+      copy.stickerId === 'jale-logo' &&
+      profile.tournamentLogo
+    ) {
+      copy.imageUrl = profile.tournamentLogo;
+    }
+    if (
+      copy.stickerId === 'signature-saif' &&
+      profile.signatureImage
+    ) {
+      copy.imageUrl = profile.signatureImage;
     }
     return copy;
   });
@@ -3511,3 +3529,4 @@ export function syncProfileToDesign(
     updatedAt: new Date().toISOString(),
   };
 }
+

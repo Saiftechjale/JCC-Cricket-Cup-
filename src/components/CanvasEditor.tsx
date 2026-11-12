@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AlignCenter,
   AlignLeft,
@@ -6,24 +6,26 @@ import {
   ArrowDown,
   ArrowUp,
   Bold,
+  Camera,
   Check,
   Copy,
   Download,
+  Edit3,
   Eye,
   FileText,
   Image as ImageIcon,
   Italic,
-  Layers,
   LayoutTemplate,
+  Loader2,
   Lock,
   Maximize2,
   Minus,
   Move,
   Palette,
+  PenTool,
   Plus,
   Redo2,
   RefreshCw,
-  RotateCw,
   Save,
   Share2,
   Sparkles,
@@ -66,6 +68,7 @@ interface CanvasEditorProps {
   categoryFilter?: TemplateCategory;
   onSaveDesign: (doc: DesignDocument, asTemplate?: boolean) => void;
   onUploadMedia: (asset: Omit<MediaAsset, 'id' | 'createdAt'>) => void;
+  onQuickUpdateProfile?: (updated: TournamentProfile) => void;
 }
 
 const AVAILABLE_FONTS = [
@@ -80,7 +83,11 @@ const AVAILABLE_FONTS = [
   { label: 'JetBrains Mono (स्कोरकार्ड मोनो)', value: 'JetBrains Mono' },
 ];
 
-const PROFILE_BIND_FIELDS: { key: keyof TournamentProfile; labelHi: string; labelEn: string }[] = [
+const PROFILE_BIND_FIELDS: {
+  key: keyof TournamentProfile;
+  labelHi: string;
+  labelEn: string;
+}[] = [
   { key: 'tournamentName', labelHi: 'टूर्नामेंट का नाम (हिंदी)', labelEn: 'Tournament Name (Hindi)' },
   { key: 'tournamentNameEn', labelHi: 'टूर्नामेंट का नाम (English)', labelEn: 'Tournament Name (English)' },
   { key: 'seasonNumber', labelHi: 'सीजन नंबर (Season)', labelEn: 'Season Number' },
@@ -109,6 +116,7 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
   categoryFilter,
   onSaveDesign,
   onUploadMedia,
+  onQuickUpdateProfile,
 }) => {
   const [doc, setDoc] = useState<DesignDocument>(() =>
     syncProfileToDesign(initialDoc, activeProfile)
@@ -124,17 +132,17 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
   const [leftTab, setLeftTab] = useState<
     'templates' | 'text' | 'shapes' | 'stickers' | 'media' | 'background'
   >('templates');
-  const [zoom, setZoom] = useState<number>(0.62);
+  const [zoom, setZoom] = useState<number>(0.5);
   const [exportPreset, setExportPreset] = useState<ExportPagePreset>('original');
-  const [customWidth, setCustomWidth] = useState<number>(1080);
-  const [customHeight, setCustomHeight] = useState<number>(1350);
-  const [isExporting, setIsExporting] = useState<boolean>(false);
+  const [customWidth] = useState<number>(1080);
+  const [customHeight] = useState<number>(1350);
+  const [exportingFormat, setExportingFormat] = useState<'pdf' | 'png' | 'jpg' | null>(null);
+  const [clickedBtn, setClickedBtn] = useState<string | null>(null);
   const [showPreviewModal, setShowPreviewModal] = useState<boolean>(false);
   const [saveToast, setSaveToast] = useState<string | null>(null);
   const [mobilePanel, setMobilePanel] = useState<'none' | 'left' | 'right'>('none');
 
-  // Drag / Resize interaction state
-  const canvasRef = useRef<HTMLDivElement | null>(null);
+  const canvasViewportRef = useRef<HTMLDivElement | null>(null);
   const dragStateRef = useRef<{
     mode: 'move' | 'resize-br' | 'resize-r' | 'resize-b' | null;
     startX: number;
@@ -150,23 +158,46 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
     initialElements: {},
   });
 
-  // Update when initialDoc changes from outside
+  const computeIdealZoom = useCallback((targetDoc: DesignDocument) => {
+    const vw = typeof window !== 'undefined' ? window.innerWidth : 1280;
+    const vh = typeof window !== 'undefined' ? window.innerHeight : 800;
+    if (vw < 640) {
+      const fitW = (vw - 28) / targetDoc.width;
+      const fitH = (vh - 230) / targetDoc.height;
+      return Math.max(0.24, Math.min(fitW, fitH, 0.55));
+    } else if (vw < 1024) {
+      const fitW = (vw - 64) / targetDoc.width;
+      return Math.max(0.32, Math.min(fitW, 0.65));
+    } else {
+      const availW = vw - 680;
+      const availH = vh - 170;
+      return Math.max(
+        0.38,
+        Math.min(availW / targetDoc.width, availH / targetDoc.height, 0.72)
+      );
+    }
+  }, []);
+
+  // Re-sync when initialDoc or activeProfile changes
   useEffect(() => {
     const synced = syncProfileToDesign(initialDoc, activeProfile);
     setDoc(synced);
     setHistory([synced]);
     setHistoryIdx(0);
     setSelectedIds(synced.elements.length > 0 ? [synced.elements[0].id] : []);
-    // Auto-calculate comfortable zoom
-    const vw = typeof window !== 'undefined' ? window.innerWidth : 1280;
-    if (vw < 640) {
-      setZoom(Math.min(0.42, (vw - 36) / synced.width));
-    } else if (vw < 1024) {
-      setZoom(0.52);
-    } else {
-      setZoom(synced.height > 1000 ? 0.58 : 0.68);
+    setZoom(computeIdealZoom(synced));
+  }, [initialDoc.id, activeProfile, computeIdealZoom]);
+
+  const markButtonClicked = (id: string, msg?: string) => {
+    setClickedBtn(id);
+    if (msg) {
+      setSaveToast(msg);
+      setTimeout(() => setSaveToast(null), 2800);
     }
-  }, [initialDoc.id]);
+    setTimeout(() => {
+      setClickedBtn((prev) => (prev === id ? null : prev));
+    }, 1600);
+  };
 
   const commitDocChange = (nextDoc: DesignDocument) => {
     setDoc(nextDoc);
@@ -181,6 +212,7 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
       const nextIdx = historyIdx - 1;
       setHistoryIdx(nextIdx);
       setDoc(history[nextIdx]);
+      markButtonClicked('undo');
     }
   };
 
@@ -189,6 +221,7 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
       const nextIdx = historyIdx + 1;
       setHistoryIdx(nextIdx);
       setDoc(history[nextIdx]);
+      markButtonClicked('redo');
     }
   };
 
@@ -207,7 +240,9 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
     });
   };
 
-  const handleAddElement = (partial: Partial<CanvasElement> & { type: CanvasElement['type'] }) => {
+  const handleAddElement = (
+    partial: Partial<CanvasElement> & { type: CanvasElement['type'] }
+  ) => {
     const id = `el-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const newEl: CanvasElement = {
       id,
@@ -252,6 +287,10 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
     commitDocChange(nextDoc);
     setSelectedIds([id]);
     setMobilePanel('none');
+    markButtonClicked(
+      'add-el',
+      lang === 'hi' ? '✓ नया एलिमेंट जुड़ गया!' : '✓ Added to canvas!'
+    );
   };
 
   const handleDuplicateSelected = () => {
@@ -274,6 +313,10 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
       updatedAt: new Date().toISOString(),
     });
     setSelectedIds(clones.map((c) => c.id));
+    markButtonClicked(
+      'dup',
+      lang === 'hi' ? '✓ डुप्लीकेट हो गया!' : '✓ Duplicated!'
+    );
   };
 
   const handleDeleteSelected = () => {
@@ -287,6 +330,10 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
       updatedAt: new Date().toISOString(),
     });
     setSelectedIds([]);
+    markButtonClicked(
+      'del',
+      lang === 'hi' ? '✓ एलिमेंट हटा दिया गया' : '✓ Element removed'
+    );
   };
 
   const handleLayerMove = (direction: 'up' | 'down' | 'front' | 'back') => {
@@ -322,6 +369,10 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
       borderFrameColor: theme.borderColor,
       elements: nextElements,
     });
+    markButtonClicked(
+      `theme-${themeId}`,
+      lang === 'hi' ? '✓ नया कलर थीम लागू हो गया!' : '✓ Visual theme applied!'
+    );
   };
 
   const handlePointerDownElement = (
@@ -428,57 +479,103 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
   };
 
   const handleExport = async (format: 'pdf' | 'png' | 'jpg') => {
-    setIsExporting(true);
+    setExportingFormat(format);
     try {
       await exportDesignDocument(doc, {
         format,
         preset: exportPreset,
-        scale: 2,
+        scale: 3,
         customWidth: exportPreset === 'Custom' ? customWidth : undefined,
         customHeight: exportPreset === 'Custom' ? customHeight : undefined,
         filename: doc.name || 'Jale_Cricket_Cup_Design',
       });
-      triggerToast(
+      markButtonClicked(
+        `exp-${format}`,
         lang === 'hi'
-          ? `${format.toUpperCase()} फाइल सफलतापूर्वक डाउनलोड हो गई!`
-          : `${format.toUpperCase()} downloaded successfully!`
+          ? `✓ Ultra-HD ${format.toUpperCase()} तैयार है!`
+          : `✓ Ultra-HD ${format.toUpperCase()} ready!`
       );
     } catch (err) {
       console.error('Export failed:', err);
     } finally {
-      setIsExporting(false);
+      setExportingFormat(null);
     }
   };
 
   const handleFileUpload = (
     e: React.ChangeEvent<HTMLInputElement>,
-    mediaCategory: MediaAsset['category']
+    mediaCategory: MediaAsset['category'],
+    replaceSelected = false
   ) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
       const dataUrl = String(reader.result || '');
+      if (!dataUrl) return;
       onUploadMedia({
         name: file.name.replace(/\.[^.]+$/, ''),
         category: mediaCategory,
         dataUrl,
       });
-      handleAddElement({
-        type: 'image',
-        label: file.name,
-        width: 220,
-        height: 220,
-        imageUrl: dataUrl,
-      });
+
+      if (replaceSelected && selectedElement) {
+        updateSelectedElements((el) => ({
+          ...el,
+          type: 'image',
+          imageUrl: dataUrl,
+        }));
+        markButtonClicked(
+          'replace-img',
+          lang === 'hi'
+            ? '✓ फोटो/लोगो सफलतापूर्वक बदल दिया गया!'
+            : '✓ Graphic replaced on canvas!'
+        );
+      } else {
+        handleAddElement({
+          type: 'image',
+          label: file.name,
+          width: 200,
+          height: 200,
+          imageUrl: dataUrl,
+        });
+      }
     };
     reader.readAsDataURL(file);
     e.target.value = '';
   };
 
-  const triggerToast = (msg: string) => {
-    setSaveToast(msg);
-    setTimeout(() => setSaveToast(null), 2800);
+  const handleUpdateGlobalLogoOrSign = (
+    e: React.ChangeEvent<HTMLInputElement>,
+    field: 'tournamentLogo' | 'signatureImage'
+  ) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = String(reader.result || '');
+      if (!dataUrl) return;
+      const nextProfile: TournamentProfile = {
+        ...activeProfile,
+        [field]: dataUrl,
+        updatedAt: new Date().toISOString(),
+      };
+      if (onQuickUpdateProfile) {
+        onQuickUpdateProfile(nextProfile);
+      }
+      const synced = syncProfileToDesign(doc, nextProfile);
+      commitDocChange(synced);
+      markButtonClicked(
+        field,
+        lang === 'hi'
+          ? field === 'tournamentLogo'
+            ? '✓ नया टूर्नामेंट लोगो कैनवास पर अपडेट हो गया!'
+            : '✓ नया हस्ताक्षर (Signature) कैनवास पर अपडेट हो गया!'
+          : '✓ Updated on canvas!'
+      );
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
   };
 
   const filteredTemplates = categoryFilter
@@ -486,11 +583,11 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
     : templates;
 
   return (
-    <div className="flex flex-col h-[calc(100vh-60px)] bg-slate-100 dark:bg-slate-950 overflow-hidden select-none">
-      {/* TOP EDITOR TOOLBAR */}
-      <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 shrink-0 z-20">
-        {/* Left: Document Title & History */}
-        <div className="flex items-center gap-2 min-w-0">
+    <div className="flex flex-col h-[calc(100vh-56px)] w-full max-w-full bg-slate-100 dark:bg-slate-950 overflow-hidden select-none">
+      {/* TOP EDITOR TOOLBAR — COMPACT & 100% VISIBLE ON MOBILE AND DESKTOP */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-2.5 sm:px-4 py-2 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 shrink-0 z-20">
+        {/* Row 1 on Mobile: Title, Undo/Redo, Save & Sync */}
+        <div className="flex items-center justify-between sm:justify-start gap-1.5 min-w-0">
           <input
             type="text"
             value={lang === 'hi' ? doc.nameHi || doc.name : doc.name}
@@ -501,11 +598,11 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
                 nameHi: e.target.value,
               })
             }
-            className="px-2.5 py-1.5 text-sm font-bold rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white w-44 sm:w-60 truncate focus:outline-none focus:ring-2 focus:ring-amber-500"
+            className="px-2.5 py-1.5 text-xs sm:text-sm font-extrabold rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white w-36 sm:w-52 truncate focus:outline-none focus:ring-2 focus:ring-amber-500"
             title="Design Name"
           />
 
-          <div className="flex items-center bg-slate-100 dark:bg-slate-800 rounded-lg p-0.5">
+          <div className="flex items-center bg-slate-100 dark:bg-slate-800 rounded-lg p-0.5 shrink-0">
             <button
               onClick={handleUndo}
               disabled={historyIdx <= 0}
@@ -526,138 +623,207 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
 
           <button
             onClick={() => {
-              const synced = syncProfileToDesign(doc, activeProfile);
-              commitDocChange(synced);
-              triggerToast(
+              onSaveDesign(doc, false);
+              markButtonClicked(
+                'save-doc',
                 lang === 'hi'
-                  ? 'टूर्नामेंट प्रोफाइल की जानकारी अपडेट हो गई!'
-                  : 'Tournament Profile synced to design!'
+                  ? '✓ डिज़ाइन सफलतापूर्वक सेव हो गया!'
+                  : '✓ Design saved!'
               );
             }}
-            className="hidden xl:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 text-xs font-bold hover:bg-blue-100 cursor-pointer whitespace-nowrap"
-            title="Auto-fill active Tournament Profile values"
+            className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-extrabold transition-all cursor-pointer shrink-0 ${
+              clickedBtn === 'save-doc'
+                ? 'bg-emerald-700 text-white ring-2 ring-emerald-300'
+                : 'bg-emerald-600 hover:bg-emerald-500 text-white'
+            }`}
+          >
+            {clickedBtn === 'save-doc' ? (
+              <Check className="w-3.5 h-3.5 stroke-[3]" />
+            ) : (
+              <Save className="w-3.5 h-3.5" />
+            )}
+            <span>
+              {clickedBtn === 'save-doc'
+                ? lang === 'hi'
+                  ? 'सेव हुआ!'
+                  : 'Saved!'
+                : lang === 'hi'
+                ? 'सेव'
+                : 'Save'}
+            </span>
+          </button>
+
+          <button
+            onClick={() => {
+              const synced = syncProfileToDesign(doc, activeProfile);
+              commitDocChange(synced);
+              markButtonClicked(
+                'sync-prof',
+                lang === 'hi'
+                  ? '✓ प्रोफाइल, लोगो व साइन सिंक हो गए!'
+                  : '✓ Tournament Profile synced!'
+              );
+            }}
+            className={`flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-bold border transition-all cursor-pointer shrink-0 ${
+              clickedBtn === 'sync-prof'
+                ? 'bg-emerald-600 text-white border-emerald-400'
+                : 'bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
+            }`}
+            title="Sync Profile Details, Logo & Signature"
           >
             <RefreshCw className="w-3.5 h-3.5" />
-            <span>{lang === 'hi' ? 'प्रोफाइल सिंक करें' : 'Sync Profile'}</span>
+            <span className="hidden md:inline">
+              {lang === 'hi' ? 'प्रोफाइल सिंक' : 'Sync'}
+            </span>
           </button>
         </div>
 
-        {/* Center: Save, Duplicate, Preview & Page Preset */}
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <button
-            onClick={() => {
-              onSaveDesign(doc, false);
-              triggerToast(
-                lang === 'hi'
-                  ? 'डिज़ाइन सफलतापूर्वक सेव हो गया!'
-                  : 'Design saved to My Saved Designs!'
-              );
-            }}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors cursor-pointer whitespace-nowrap"
-          >
-            <Save className="w-3.5 h-3.5" />
-            <span>{lang === 'hi' ? 'सेव करें' : 'Save'}</span>
-          </button>
-
-          <button
-            onClick={handleDuplicateSelected}
-            disabled={selectedIds.length === 0}
-            className="hidden sm:flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 text-xs font-semibold hover:bg-slate-50 disabled:opacity-40 cursor-pointer whitespace-nowrap"
-          >
-            <Copy className="w-3.5 h-3.5" />
-            <span>{lang === 'hi' ? 'डुप्लीकेट' : 'Duplicate'}</span>
-          </button>
-
-          <button
-            onClick={() => setShowPreviewModal(true)}
-            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 text-xs font-semibold hover:bg-slate-50 cursor-pointer whitespace-nowrap"
-          >
-            <Eye className="w-3.5 h-3.5" />
-            <span className="hidden md:inline">{lang === 'hi' ? 'प्रीव्यू' : 'Preview'}</span>
-          </button>
-
+        {/* Row 2 on Mobile / Right Side on Desktop: Preset + HD PDF / PNG / JPG + Preview + Share */}
+        <div className="flex items-center justify-between sm:justify-end gap-1.5 flex-wrap">
           <select
             value={exportPreset}
             onChange={(e) => setExportPreset(e.target.value as ExportPagePreset)}
-            className="px-2 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-xs font-semibold focus:outline-none"
-            title="Export Page / Social Media Size"
+            className="px-2 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-[11px] font-bold focus:outline-none max-w-[125px] sm:max-w-[170px] truncate"
+            title="Export Size"
           >
             <option value="original">
-              {lang === 'hi' ? `मूल आकार (${doc.width}x${doc.height})` : `Original (${doc.width}x${doc.height})`}
+              {lang === 'hi'
+                ? `HD मूल (${doc.width}×${doc.height})`
+                : `HD Original (${doc.width}×${doc.height})`}
             </option>
             <option value="A4-Portrait">A4 Portrait (प्रिंट)</option>
-            <option value="A4-Landscape">A4 Landscape (प्रमाण-पत्र/वाउचर)</option>
-            <option value="A5-Portrait">A5 Size (आमंत्रण/हैंडबिल)</option>
-            <option value="Facebook-Portrait">Facebook Portrait (1080x1350)</option>
-            <option value="Instagram-Square">Instagram Square (1080x1080)</option>
-            <option value="Instagram-Story">Instagram Story (1080x1920)</option>
-            <option value="Custom">Custom Size (कस्टम आकार)</option>
+            <option value="A4-Landscape">A4 Landscape (वाउचर/सर्टिफिकेट)</option>
+            <option value="A5-Portrait">A5 Size (आमंत्रण कार्ड)</option>
+            <option value="Facebook-Portrait">Facebook (1080×1350)</option>
+            <option value="Instagram-Square">Instagram (1080×1080)</option>
+            <option value="Instagram-Story">Story/Status (1080×1920)</option>
           </select>
-        </div>
 
-        {/* Right: Download PDF, PNG, JPG & Share */}
-        <div className="flex items-center gap-1.5">
-          <button
-            onClick={() => handleExport('pdf')}
-            disabled={isExporting}
-            className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-500 text-white text-xs font-bold shadow-xs transition-colors cursor-pointer whitespace-nowrap"
-          >
-            <FileText className="w-3.5 h-3.5" />
-            <span>PDF</span>
-          </button>
-          <button
-            onClick={() => handleExport('png')}
-            disabled={isExporting}
-            className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-900 dark:bg-amber-500 hover:bg-slate-800 dark:hover:bg-amber-400 text-white dark:text-slate-950 text-xs font-bold shadow-xs transition-colors cursor-pointer whitespace-nowrap"
-          >
-            <Download className="w-3.5 h-3.5" />
-            <span>PNG</span>
-          </button>
-          <button
-            onClick={() => handleExport('jpg')}
-            disabled={isExporting}
-            className="hidden sm:flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-blue-700 hover:bg-blue-600 text-white text-xs font-bold shadow-xs transition-colors cursor-pointer whitespace-nowrap"
-          >
-            <Download className="w-3.5 h-3.5" />
-            <span>JPG</span>
-          </button>
-          <button
-            onClick={() => shareDesignDocument(doc)}
-            className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
-            title={lang === 'hi' ? 'शेयर करें (WhatsApp/Share)' : 'Share Design'}
-          >
-            <Share2 className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => handleExport('pdf')}
+              disabled={exportingFormat !== null}
+              className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-extrabold shadow-xs transition-all cursor-pointer whitespace-nowrap ${
+                clickedBtn === 'exp-pdf'
+                  ? 'bg-emerald-600 text-white'
+                  : 'bg-red-600 hover:bg-red-500 text-white'
+              }`}
+            >
+              {exportingFormat === 'pdf' ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : clickedBtn === 'exp-pdf' ? (
+                <Check className="w-3.5 h-3.5 stroke-[3]" />
+              ) : (
+                <FileText className="w-3.5 h-3.5" />
+              )}
+              <span>PDF</span>
+            </button>
+
+            <button
+              onClick={() => handleExport('png')}
+              disabled={exportingFormat !== null}
+              className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-extrabold shadow-xs transition-all cursor-pointer whitespace-nowrap ${
+                clickedBtn === 'exp-png'
+                  ? 'bg-emerald-600 text-white'
+                  : 'bg-[#0B192C] dark:bg-amber-500 hover:bg-slate-800 dark:hover:bg-amber-400 text-white dark:text-slate-950'
+              }`}
+            >
+              {exportingFormat === 'png' ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : clickedBtn === 'exp-png' ? (
+                <Check className="w-3.5 h-3.5 stroke-[3]" />
+              ) : (
+                <Download className="w-3.5 h-3.5" />
+              )}
+              <span>PNG</span>
+            </button>
+
+            <button
+              onClick={() => handleExport('jpg')}
+              disabled={exportingFormat !== null}
+              className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-extrabold shadow-xs transition-all cursor-pointer whitespace-nowrap ${
+                clickedBtn === 'exp-jpg'
+                  ? 'bg-emerald-600 text-white'
+                  : 'bg-blue-700 hover:bg-blue-600 text-white'
+              }`}
+            >
+              {exportingFormat === 'jpg' ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : clickedBtn === 'exp-jpg' ? (
+                <Check className="w-3.5 h-3.5 stroke-[3]" />
+              ) : (
+                <ImageIcon className="w-3.5 h-3.5" />
+              )}
+              <span>JPG</span>
+            </button>
+
+            <button
+              onClick={() => setShowPreviewModal(true)}
+              className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 cursor-pointer"
+              title={lang === 'hi' ? 'फुल प्रीव्यू देखें' : 'Full Preview'}
+            >
+              <Eye className="w-4 h-4" />
+            </button>
+
+            <button
+              onClick={() => shareDesignDocument(doc)}
+              className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-100 cursor-pointer"
+              title={lang === 'hi' ? 'शेयर करें (WhatsApp)' : 'Share Design'}
+            >
+              <Share2 className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       </div>
 
       {/* TOAST NOTIFICATION */}
       {saveToast && (
-        <div className="fixed top-16 right-6 z-50 flex items-center gap-2 bg-emerald-600 text-white px-4 py-2.5 rounded-xl shadow-lg text-xs font-bold">
-          <Check className="w-4 h-4" />
+        <div className="fixed top-16 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-emerald-600 text-white px-4 py-2.5 rounded-xl shadow-2xl border border-emerald-300 text-xs font-extrabold">
+          <Check className="w-4 h-4 shrink-0 stroke-[3]" />
           <span>{saveToast}</span>
         </div>
       )}
 
       {/* MAIN 3-COLUMN EDITOR WORKSPACE */}
       <div className="flex flex-1 min-h-0 relative overflow-hidden">
+        {/* Mobile Overlay Backdrop when Left or Right Drawer is Open */}
+        {mobilePanel !== 'none' && (
+          <div
+            onClick={() => setMobilePanel('none')}
+            className="fixed inset-0 z-30 bg-black/50 backdrop-blur-xs lg:hidden"
+          />
+        )}
+
         {/* LEFT PANEL: TOOLS & ASSETS */}
         <aside
           className={`${
             mobilePanel === 'left'
-              ? 'fixed inset-y-0 left-0 z-40 flex w-80'
+              ? 'fixed inset-y-0 left-0 z-40 flex w-[88vw] max-w-xs shadow-2xl'
               : 'hidden lg:flex w-80'
           } flex-col bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 shrink-0`}
         >
+          {/* Mobile Drawer Header */}
+          <div className="flex items-center justify-between px-3.5 py-2.5 border-b border-slate-200 dark:border-slate-800 lg:hidden bg-[#0B192C] text-white">
+            <span className="text-xs font-black text-amber-400">
+              {lang === 'hi' ? 'डिज़ाइन टूल्स व टेम्पलेट्स' : 'Studio Tools & Templates'}
+            </span>
+            <button
+              onClick={() => setMobilePanel('none')}
+              className="p-1 rounded-lg text-slate-300 hover:text-white"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
           {/* Tool Category Tabs */}
           <div className="grid grid-cols-6 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 p-1 gap-0.5">
             {[
               { id: 'templates', icon: LayoutTemplate, labelHi: 'टेम्पलेट', labelEn: 'Templates' },
               { id: 'text', icon: Type, labelHi: 'टेक्स्ट', labelEn: 'Text' },
+              { id: 'media', icon: Camera, labelHi: 'लोगो/साइन', labelEn: 'Logo/Sign' },
               { id: 'stickers', icon: Sparkles, labelHi: 'स्टीकर', labelEn: 'Stickers' },
               { id: 'shapes', icon: Square, labelHi: 'शेप/टेबल', labelEn: 'Shapes' },
-              { id: 'media', icon: Upload, labelHi: 'फोटो/लोगो', labelEn: 'Upload' },
-              { id: 'background', icon: Palette, labelHi: 'बैकग्राउंड', labelEn: 'Theme' },
+              { id: 'background', icon: Palette, labelHi: 'थीम/रंग', labelEn: 'Theme' },
             ].map((tab) => {
               const Icon = tab.icon;
               const active = leftTab === tab.id;
@@ -667,7 +833,7 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
                   onClick={() => setLeftTab(tab.id as typeof leftTab)}
                   className={`flex flex-col items-center justify-center py-2 px-1 rounded-lg text-[10px] font-bold transition-colors cursor-pointer ${
                     active
-                      ? 'bg-slate-900 dark:bg-amber-500 text-white dark:text-slate-950 shadow-xs'
+                      ? 'bg-[#0B192C] dark:bg-amber-500 text-amber-400 dark:text-slate-950 shadow-xs'
                       : 'text-slate-600 dark:text-slate-400 hover:bg-slate-200/60 dark:hover:bg-slate-800'
                   }`}
                 >
@@ -691,15 +857,16 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
                   <button
                     onClick={() => {
                       onSaveDesign(doc, true);
-                      triggerToast(
+                      markButtonClicked(
+                        'save-tpl',
                         lang === 'hi'
-                          ? 'नए टेम्पलेट के रूप में सेव किया गया!'
-                          : 'Saved as Reusable Template!'
+                          ? '✓ नए टेम्पलेट के रूप में सेव किया गया!'
+                          : '✓ Saved as Reusable Template!'
                       );
                     }}
-                    className="text-[11px] font-bold text-amber-600 dark:text-amber-400 hover:underline cursor-pointer"
+                    className="text-[11px] font-extrabold text-amber-600 dark:text-amber-400 hover:underline cursor-pointer"
                   >
-                    + {lang === 'hi' ? 'टेम्पलेट सेव करें' : 'Save as Template'}
+                    + {lang === 'hi' ? 'टेम्पलेट सेव करें' : 'Save Template'}
                   </button>
                 </div>
 
@@ -713,19 +880,26 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
                         setSelectedIds(
                           synced.elements.length > 0 ? [synced.elements[0].id] : []
                         );
+                        setZoom(computeIdealZoom(synced));
                         setMobilePanel('none');
+                        markButtonClicked(
+                          `tpl-${tpl.id}`,
+                          lang === 'hi'
+                            ? `✓ "${tpl.nameHi || tpl.name}" लोड हो गया!`
+                            : `✓ Loaded "${tpl.name}"!`
+                        );
                       }}
                       className={`text-left p-3 rounded-xl border transition-all cursor-pointer ${
                         doc.id === tpl.id
-                          ? 'border-amber-500 bg-amber-50/60 dark:bg-amber-950/30'
+                          ? 'border-amber-500 bg-amber-50/70 dark:bg-amber-950/30 ring-2 ring-amber-500/30'
                           : 'border-slate-200 dark:border-slate-800 hover:border-slate-400 bg-slate-50/60 dark:bg-slate-800/50'
                       }`}
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-xs font-bold text-slate-900 dark:text-white">
-                          {lang === 'hi' ? tpl.nameHi : tpl.name}
+                        <span className="text-xs font-extrabold text-slate-900 dark:text-white">
+                          {lang === 'hi' ? tpl.nameHi || tpl.name : tpl.name}
                         </span>
-                        <span className="text-[10px] font-mono text-slate-500">
+                        <span className="text-[10px] font-mono text-slate-500 shrink-0">
                           {tpl.width}×{tpl.height}
                         </span>
                       </div>
@@ -757,9 +931,9 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
                         height: 75,
                       })
                     }
-                    className="w-full py-2.5 px-3 rounded-xl bg-slate-900 dark:bg-amber-500 text-white dark:text-slate-950 font-black text-base text-left cursor-pointer hover:opacity-90"
+                    className="w-full py-2.5 px-3 rounded-xl bg-slate-900 dark:bg-amber-500 text-white dark:text-slate-950 font-black text-sm text-left cursor-pointer hover:opacity-90"
                   >
-                    + {lang === 'hi' ? 'मुख्य हेडिंग (Add Heading)' : 'Add Heading'}
+                    + {lang === 'hi' ? 'मुख्य हेडिंग जोड़ें (Heading)' : 'Add Heading'}
                   </button>
                   <button
                     onClick={() =>
@@ -774,7 +948,7 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
                         height: 55,
                       })
                     }
-                    className="w-full py-2 px-3 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white font-bold text-sm text-left cursor-pointer hover:bg-slate-200"
+                    className="w-full py-2 px-3 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white font-bold text-xs text-left cursor-pointer hover:bg-slate-200"
                   >
                     + {lang === 'hi' ? 'सब-हेडिंग जोड़ें (Subheading)' : 'Add Subheading'}
                   </button>
@@ -846,6 +1020,117 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
                           {lang === 'hi' ? bf.labelHi : bf.labelEn}
                         </span>
                         <Plus className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {leftTab === 'media' && (
+              <div className="space-y-4">
+                <h4 className="text-xs font-extrabold text-slate-900 dark:text-white">
+                  {lang === 'hi'
+                    ? 'टूर्नामेंट लोगो, हस्ताक्षर (Sign) या फोटो अपडेट करें'
+                    : 'Update Logo, Signature or Add Photo'}
+                </h4>
+
+                <div className="grid grid-cols-1 gap-2.5">
+                  <label
+                    role="button"
+                    className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl font-extrabold text-xs cursor-pointer shadow-xs ${
+                      clickedBtn === 'tournamentLogo'
+                        ? 'bg-emerald-600 text-white'
+                        : 'bg-amber-500 hover:bg-amber-400 text-slate-950'
+                    }`}
+                  >
+                    <Camera className="w-4 h-4" />
+                    <span>
+                      {lang === 'hi'
+                        ? 'मेन टूर्नामेंट लोगो बदलें (Update Logo)'
+                        : 'Update Main Tournament Logo'}
+                    </span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) =>
+                        handleUpdateGlobalLogoOrSign(e, 'tournamentLogo')
+                      }
+                      className="hidden"
+                    />
+                  </label>
+
+                  <label
+                    role="button"
+                    className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl font-extrabold text-xs cursor-pointer shadow-xs ${
+                      clickedBtn === 'signatureImage'
+                        ? 'bg-emerald-600 text-white'
+                        : 'bg-blue-600 hover:bg-blue-500 text-white'
+                    }`}
+                  >
+                    <PenTool className="w-4 h-4" />
+                    <span>
+                      {lang === 'hi'
+                        ? 'अध्यक्ष/आयोजक साइन बदलें (Update Sign)'
+                        : 'Update Authorized Signature'}
+                    </span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) =>
+                        handleUpdateGlobalLogoOrSign(e, 'signatureImage')
+                      }
+                      className="hidden"
+                    />
+                  </label>
+
+                  <label
+                    role="button"
+                    className="flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl border border-slate-300 dark:border-slate-700 text-slate-800 dark:text-slate-200 font-bold text-xs cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800"
+                  >
+                    <Upload className="w-4 h-4" />
+                    <span>
+                      {lang === 'hi'
+                        ? 'नई फोटो / स्पॉन्सर लोगो कैनवास पर जोड़ें'
+                        : 'Add New Photo / Sponsor Logo'}
+                    </span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => handleFileUpload(e, 'Player Photo', false)}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+
+                <div className="pt-3 border-t border-slate-200 dark:border-slate-800 space-y-2">
+                  <h5 className="text-xs font-bold text-slate-600 dark:text-slate-400">
+                    {lang === 'hi' ? 'सेव किए गए लोगो व ग्राफिक्स' : 'Saved Media Library'}
+                  </h5>
+                  <div className="grid grid-cols-2 gap-2">
+                    {mediaLibrary.map((asset) => (
+                      <button
+                        key={asset.id}
+                        onClick={() =>
+                          handleAddElement({
+                            type: 'image',
+                            label: asset.name,
+                            imageUrl: asset.dataUrl,
+                            width: 180,
+                            height: 180,
+                          })
+                        }
+                        className="p-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 hover:border-amber-500 flex flex-col items-center cursor-pointer"
+                      >
+                        <img
+                          src={asset.dataUrl}
+                          alt={asset.name}
+                          referrerPolicy="no-referrer"
+                          className="w-14 h-14 object-contain mb-1"
+                        />
+                        <span className="text-[10px] font-semibold text-slate-700 dark:text-slate-300 truncate w-full text-center">
+                          {asset.name}
+                        </span>
                       </button>
                     ))}
                   </div>
@@ -979,70 +1264,6 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
               </div>
             )}
 
-            {leftTab === 'media' && (
-              <div className="space-y-4">
-                <h4 className="text-xs font-extrabold text-slate-900 dark:text-white">
-                  {lang === 'hi' ? 'लोगो, फोटो या हस्ताक्षर अपलोड करें' : 'Upload Logo, Photo or Signature'}
-                </h4>
-                <div className="grid grid-cols-1 gap-2">
-                  <label className="flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl bg-slate-900 dark:bg-amber-500 text-white dark:text-slate-950 font-bold text-xs cursor-pointer hover:opacity-90">
-                    <Upload className="w-4 h-4" />
-                    <span>{lang === 'hi' ? 'टूर्नामेंट लोगो अपलोड करें' : 'Upload Tournament Logo'}</span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={(e) => handleFileUpload(e, 'Tournament Logo')}
-                      className="hidden"
-                    />
-                  </label>
-
-                  <label className="flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl border border-slate-300 dark:border-slate-700 text-slate-800 dark:text-slate-200 font-bold text-xs cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800">
-                    <ImageIcon className="w-4 h-4" />
-                    <span>{lang === 'hi' ? 'खिलाड़ी / अतिथि फोटो अपलोड करें' : 'Upload Player / Guest Photo'}</span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={(e) => handleFileUpload(e, 'Player Photo')}
-                      className="hidden"
-                    />
-                  </label>
-                </div>
-
-                <div className="pt-3 border-t border-slate-200 dark:border-slate-800 space-y-2">
-                  <h5 className="text-xs font-bold text-slate-600 dark:text-slate-400">
-                    {lang === 'hi' ? 'मीडिया लाइब्रेरी एसेट्स' : 'Saved Media Library'}
-                  </h5>
-                  <div className="grid grid-cols-2 gap-2">
-                    {mediaLibrary.map((asset) => (
-                      <button
-                        key={asset.id}
-                        onClick={() =>
-                          handleAddElement({
-                            type: 'image',
-                            label: asset.name,
-                            imageUrl: asset.dataUrl,
-                            width: 180,
-                            height: 180,
-                          })
-                        }
-                        className="p-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 hover:border-amber-500 flex flex-col items-center cursor-pointer"
-                      >
-                        <img
-                          src={asset.dataUrl}
-                          alt={asset.name}
-                          referrerPolicy="no-referrer"
-                          className="w-14 h-14 object-contain mb-1"
-                        />
-                        <span className="text-[10px] font-semibold text-slate-700 dark:text-slate-300 truncate w-full text-center">
-                          {asset.name}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
-
             {leftTab === 'background' && (
               <div className="space-y-4">
                 <h4 className="text-xs font-extrabold text-slate-900 dark:text-white">
@@ -1122,15 +1343,15 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
 
         {/* CENTER INTERACTIVE DESIGN CANVAS */}
         <main
+          ref={canvasViewportRef}
           onClick={() => setSelectedIds([])}
-          className="flex-1 flex flex-col items-center justify-between bg-slate-200/80 dark:bg-slate-950 overflow-auto p-4 sm:p-8 relative"
+          className="flex-1 flex flex-col items-center justify-between bg-slate-200/80 dark:bg-slate-950 overflow-auto p-2 sm:p-6 relative min-w-0"
         >
-          <div className="flex-1 flex items-center justify-center min-h-max min-w-max py-4">
+          <div className="flex-1 flex items-center justify-center min-h-max min-w-max py-2">
             <div
-              ref={canvasRef}
               style={{
-                width: doc.width * zoom,
-                height: doc.height * zoom,
+                width: Math.round(doc.width * zoom),
+                height: Math.round(doc.height * zoom),
               }}
               className="relative shadow-2xl transition-shadow"
             >
@@ -1164,9 +1385,10 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
                 {doc.elements.map((el) => {
                   const isSelected = selectedIds.includes(el.id);
                   const stickerUrl =
-                    el.type === 'sticker' && el.stickerId
+                    el.imageUrl ||
+                    (el.type === 'sticker' && el.stickerId
                       ? getStickerDataUrl(el.stickerId)
-                      : el.imageUrl;
+                      : undefined);
 
                   return (
                     <div
@@ -1313,20 +1535,20 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
                             onPointerDown={(e) =>
                               handlePointerDownElement(e, el, 'resize-br')
                             }
-                            className="absolute -bottom-2.5 -right-2.5 w-5 h-5 rounded-full bg-amber-500 border-2 border-white shadow-md cursor-nwse-resize"
+                            className="absolute -bottom-3 -right-3 w-6 h-6 rounded-full bg-amber-500 border-2 border-white shadow-md cursor-nwse-resize"
                             title="Drag to Resize"
                           />
                           <div
                             onPointerDown={(e) =>
                               handlePointerDownElement(e, el, 'resize-r')
                             }
-                            className="absolute top-1/2 -right-2 -translate-y-1/2 w-3.5 h-7 rounded-full bg-blue-600 border border-white shadow-xs cursor-ew-resize"
+                            className="absolute top-1/2 -right-2.5 -translate-y-1/2 w-4 h-8 rounded-full bg-blue-600 border border-white shadow-xs cursor-ew-resize"
                           />
                           <div
                             onPointerDown={(e) =>
                               handlePointerDownElement(e, el, 'resize-b')
                             }
-                            className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-7 h-3.5 rounded-full bg-blue-600 border border-white shadow-xs cursor-ns-resize"
+                            className="absolute -bottom-2.5 left-1/2 -translate-x-1/2 w-8 h-4 rounded-full bg-blue-600 border border-white shadow-xs cursor-ns-resize"
                           />
                         </>
                       )}
@@ -1338,39 +1560,56 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
           </div>
 
           {/* BOTTOM FLOATING ZOOM & MOBILE CONTROLS */}
-          <div className="sticky bottom-2 z-20 flex items-center gap-2 bg-slate-900/90 text-white px-3.5 py-2 rounded-2xl shadow-xl backdrop-blur-xs">
+          <div className="sticky bottom-1 z-20 flex flex-wrap items-center justify-center gap-1.5 bg-[#0B192C]/95 text-white px-3 py-2 rounded-2xl shadow-xl border border-slate-700 max-w-full">
             <button
-              onClick={() =>
-                setMobilePanel(mobilePanel === 'left' ? 'none' : 'left')
-              }
-              className="lg:hidden flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-500 text-slate-950 font-bold text-xs"
+              onClick={() => {
+                setLeftTab('templates');
+                setMobilePanel(mobilePanel === 'left' ? 'none' : 'left');
+              }}
+              className="lg:hidden flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-amber-500 text-slate-950 font-black text-xs cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5" />
-              <span>{lang === 'hi' ? 'टूल्स' : 'Tools'}</span>
+              <span>{lang === 'hi' ? 'टेम्पलेट/टूल्स' : 'Tools'}</span>
             </button>
 
+            <label
+              role="button"
+              className="lg:hidden flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-emerald-600 text-white font-bold text-xs cursor-pointer"
+            >
+              <Camera className="w-3.5 h-3.5" />
+              <span>{lang === 'hi' ? 'लोगो' : 'Logo'}</span>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) => handleUpdateGlobalLogoOrSign(e, 'tournamentLogo')}
+                className="hidden"
+              />
+            </label>
+
             <button
-              onClick={() => setZoom((z) => Math.max(0.3, +(z - 0.08).toFixed(2)))}
-              className="p-1 hover:bg-slate-800 rounded-lg cursor-pointer"
+              onClick={() => setZoom((z) => Math.max(0.22, +(z - 0.06).toFixed(2)))}
+              className="p-1.5 hover:bg-slate-800 rounded-lg cursor-pointer"
               title="Zoom Out"
             >
               <ZoomOut className="w-4 h-4" />
             </button>
-            <span className="text-xs font-mono font-bold tabular-nums min-w-[46px] text-center">
+            <span className="text-xs font-mono font-bold tabular-nums min-w-[42px] text-center">
               {Math.round(zoom * 100)}%
             </span>
             <button
-              onClick={() => setZoom((z) => Math.min(1.5, +(z + 0.08).toFixed(2)))}
-              className="p-1 hover:bg-slate-800 rounded-lg cursor-pointer"
+              onClick={() => setZoom((z) => Math.min(1.5, +(z + 0.06).toFixed(2)))}
+              className="p-1.5 hover:bg-slate-800 rounded-lg cursor-pointer"
               title="Zoom In"
             >
               <ZoomIn className="w-4 h-4" />
             </button>
             <button
-              onClick={() => setZoom(0.62)}
-              className="p-1 hover:bg-slate-800 rounded-lg text-[11px] font-semibold px-2 cursor-pointer"
+              onClick={() => setZoom(computeIdealZoom(doc))}
+              className="px-2 py-1 hover:bg-slate-800 rounded-lg text-[11px] font-bold flex items-center gap-1 cursor-pointer border border-slate-700"
+              title="Fit to Screen"
             >
-              <Maximize2 className="w-3.5 h-3.5" />
+              <Maximize2 className="w-3 h-3" />
+              <span>{lang === 'hi' ? 'फिट' : 'Fit'}</span>
             </button>
 
             {selectedElement && (
@@ -1378,9 +1617,9 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
                 onClick={() =>
                   setMobilePanel(mobilePanel === 'right' ? 'none' : 'right')
                 }
-                className="lg:hidden flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-600 text-white font-bold text-xs"
+                className="lg:hidden flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-blue-600 text-white font-black text-xs cursor-pointer"
               >
-                <Type className="w-3.5 h-3.5" />
+                <Edit3 className="w-3.5 h-3.5" />
                 <span>{lang === 'hi' ? 'एडिट करें' : 'Edit'}</span>
               </button>
             )}
@@ -1391,7 +1630,7 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
         <aside
           className={`${
             mobilePanel === 'right'
-              ? 'fixed inset-y-0 right-0 z-40 flex w-80'
+              ? 'fixed inset-y-0 right-0 z-40 flex w-[88vw] max-w-xs shadow-2xl'
               : 'hidden lg:flex w-80'
           } flex-col bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 shrink-0 overflow-y-auto p-4 space-y-4`}
         >
@@ -1410,23 +1649,23 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
           </div>
 
           {!selectedElement ? (
-            <div className="py-12 text-center space-y-3">
-              <Move className="w-10 h-10 text-slate-400 mx-auto" />
+            <div className="py-6 text-center space-y-3">
+              <Move className="w-9 h-9 text-amber-500 mx-auto" />
               <p className="text-xs font-semibold text-slate-600 dark:text-slate-400">
                 {lang === 'hi'
-                  ? 'किसी भी टेक्स्ट, फोटो, ट्रॉफी या बॉक्स को बदलने के लिए कैनवास पर उस पर क्लिक करें।'
-                  : 'Click any text, image, trophy, or shape on the canvas to edit its properties.'}
+                  ? 'किसी भी टेक्स्ट, लोगो, साइन या बॉक्स को बदलने के लिए कैनवास पर उस पर टैप करें या नीचे की सूची से चुनें:'
+                  : 'Tap any text, logo, or shape on the canvas or select from the layers list below:'}
               </p>
-              <div className="pt-4 border-t border-slate-200 dark:border-slate-800 text-left space-y-2">
+              <div className="pt-3 border-t border-slate-200 dark:border-slate-800 text-left space-y-2">
                 <span className="text-[11px] font-bold text-slate-500 block">
                   {lang === 'hi' ? 'सभी लेयर्स (All Layers):' : 'All Canvas Layers:'}
                 </span>
-                <div className="max-h-72 overflow-y-auto space-y-1">
+                <div className="max-h-80 overflow-y-auto space-y-1">
                   {doc.elements.map((item, i) => (
                     <button
                       key={item.id}
                       onClick={() => setSelectedIds([item.id])}
-                      className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs bg-slate-50 dark:bg-slate-800 hover:bg-amber-50 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-semibold text-left cursor-pointer"
+                      className="w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-xs bg-slate-50 dark:bg-slate-800 hover:bg-amber-50 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-semibold text-left cursor-pointer"
                     >
                       <span className="truncate">
                         {i + 1}. {item.text ? item.text.slice(0, 26) : item.label || item.type}
@@ -1487,6 +1726,35 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
                   <Trash2 className="w-4 h-4" />
                 </button>
               </div>
+
+              {/* IMAGE / STICKER / LOGO / SIGNATURE REPLACEMENT BUTTON */}
+              {(selectedElement.type === 'image' ||
+                selectedElement.type === 'sticker') && (
+                <div className="p-3 rounded-xl bg-amber-50 dark:bg-slate-800 border border-amber-300 dark:border-amber-500/40 space-y-2">
+                  <label className="block text-xs font-extrabold text-slate-900 dark:text-white">
+                    {lang === 'hi'
+                      ? 'यह फोटो / लोगो / हस्ताक्षर बदलें:'
+                      : 'Replace Selected Logo / Photo / Sign:'}
+                  </label>
+                  <label
+                    role="button"
+                    className="w-full py-2.5 px-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
+                  >
+                    <Camera className="w-4 h-4" />
+                    <span>
+                      {lang === 'hi'
+                        ? 'गैलरी से नई इमेज चुनें (Replace)'
+                        : 'Choose Image from Gallery'}
+                    </span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => handleFileUpload(e, 'Tournament Logo', true)}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+              )}
 
               {/* TEXT EDITING CONTROLS */}
               {(selectedElement.type === 'heading' ||
@@ -1560,11 +1828,15 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
                       onClick={() =>
                         updateSelectedElements((el) => ({
                           ...el,
-                          fontWeight: el.fontWeight === '900' || el.fontWeight === '800' ? '500' : '900',
+                          fontWeight:
+                            el.fontWeight === '900' || el.fontWeight === '800'
+                              ? '500'
+                              : '900',
                         }))
                       }
                       className={`p-1.5 rounded-lg cursor-pointer ${
-                        selectedElement.fontWeight === '900' || selectedElement.fontWeight === '800'
+                        selectedElement.fontWeight === '900' ||
+                        selectedElement.fontWeight === '800'
                           ? 'bg-slate-900 text-white dark:bg-amber-500 dark:text-slate-950'
                           : 'text-slate-700 dark:text-slate-300'
                       }`}
@@ -1605,7 +1877,6 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
                     >
                       <Underline className="w-4 h-4" />
                     </button>
-                    <div className="h-4 w-px bg-slate-300 dark:bg-slate-700" />
                     <button
                       onClick={() =>
                         updateSelectedElements((el) => ({ ...el, textAlign: 'left' }))
@@ -1644,185 +1915,85 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
                     </button>
                   </div>
 
-                  {/* Line Height & Letter Spacing */}
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">
-                        {lang === 'hi' ? 'लाइन स्पेसिंग' : 'Line Height'}
-                      </label>
+                  {/* Text Color */}
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">
+                      {lang === 'hi' ? 'टेक्स्ट का रंग (Text Color)' : 'Text Color'}
+                    </label>
+                    <div className="flex items-center gap-2">
                       <input
-                        type="number"
-                        step="0.05"
-                        min={0.9}
-                        max={2.5}
-                        value={selectedElement.lineHeight || 1.38}
+                        type="color"
+                        value={selectedElement.color || '#0F172A'}
                         onChange={(e) =>
                           updateSelectedElements((el) => ({
                             ...el,
-                            lineHeight: Number(e.target.value),
+                            color: e.target.value,
                           }))
                         }
-                        className="w-full px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-bold"
+                        className="w-9 h-8 rounded cursor-pointer shrink-0"
                       />
-                    </div>
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">
-                        {lang === 'hi' ? 'लेटर स्पेसिंग' : 'Letter Spacing'}
-                      </label>
-                      <input
-                        type="number"
-                        step="0.5"
-                        min={-2}
-                        max={20}
-                        value={selectedElement.letterSpacing || 0}
-                        onChange={(e) =>
-                          updateSelectedElements((el) => ({
-                            ...el,
-                            letterSpacing: Number(e.target.value),
-                          }))
-                        }
-                        className="w-full px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-bold"
-                      />
+                      <div className="flex flex-wrap gap-1">
+                        {[
+                          '#0F172A',
+                          '#FFFFFF',
+                          '#DC2626',
+                          '#1E3A8A',
+                          '#FDE047',
+                          '#15803D',
+                          '#EA580C',
+                        ].map((c) => (
+                          <button
+                            key={c}
+                            onClick={() =>
+                              updateSelectedElements((el) => ({ ...el, color: c }))
+                            }
+                            style={{ backgroundColor: c }}
+                            className="w-5 h-5 rounded-full border border-slate-300 cursor-pointer"
+                          />
+                        ))}
+                      </div>
                     </div>
                   </div>
                 </div>
               )}
 
-              {/* TABLE EDITOR CONTROLS */}
-              {selectedElement.type === 'table' &&
-                selectedElement.tableHeaders &&
-                selectedElement.tableRows && (
-                  <div className="space-y-3 pt-2 border-t border-slate-200 dark:border-slate-800">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-extrabold text-slate-900 dark:text-white">
-                        {lang === 'hi' ? 'टेबल डेटा एडिट करें' : 'Edit Table Rows'}
-                      </span>
-                      <button
-                        onClick={() =>
-                          updateSelectedElements((el) => ({
-                            ...el,
-                            tableRows: [
-                              ...(el.tableRows || []),
-                              new Array(el.tableHeaders?.length || 3).fill(''),
-                            ],
-                          }))
-                        }
-                        className="text-xs font-bold text-emerald-600 hover:underline cursor-pointer"
-                      >
-                        + {lang === 'hi' ? 'नई पंक्ति (Add Row)' : 'Add Row'}
-                      </button>
-                    </div>
-
-                    <div className="max-h-60 overflow-y-auto space-y-2 pr-1">
-                      {selectedElement.tableRows.map((row, rIdx) => (
-                        <div
-                          key={rIdx}
-                          className="p-2 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 space-y-1"
-                        >
-                          <div className="flex items-center justify-between text-[10px] font-bold text-slate-500">
-                            <span>Row #{rIdx + 1}</span>
-                            <button
-                              onClick={() =>
-                                updateSelectedElements((el) => ({
-                                  ...el,
-                                  tableRows: (el.tableRows || []).filter(
-                                    (_, idx) => idx !== rIdx
-                                  ),
-                                }))
-                              }
-                              className="text-red-500 hover:underline"
-                            >
-                              Delete
-                            </button>
-                          </div>
-                          <div className="grid grid-cols-1 gap-1">
-                            {row.map((cellVal, cIdx) => (
-                              <input
-                                key={cIdx}
-                                type="text"
-                                placeholder={selectedElement.tableHeaders?.[cIdx] || ''}
-                                value={cellVal}
-                                onChange={(e) => {
-                                  const nextVal = e.target.value;
-                                  updateSelectedElements((el) => {
-                                    const copyRows = (el.tableRows || []).map((r) => [
-                                      ...r,
-                                    ]);
-                                    copyRows[rIdx][cIdx] = nextVal;
-                                    return { ...el, tableRows: copyRows };
-                                  });
-                                }}
-                                className="px-2 py-1 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-medium text-slate-900 dark:text-white"
-                              />
-                            ))}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-              {/* COLORS, BACKGROUND, BORDER & OPACITY */}
+              {/* COMMON SHAPE / BOX / ELEMENT STYLING */}
               <div className="space-y-3 pt-3 border-t border-slate-200 dark:border-slate-800">
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">
-                      {lang === 'hi' ? 'टेक्स्ट / लाइन कलर' : 'Text / Foreground'}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400">
+                      {lang === 'hi' ? 'बॉक्स बैकग्राउंड कलर' : 'Box Background Color'}
                     </label>
-                    <input
-                      type="color"
-                      value={selectedElement.color || '#0F172A'}
-                      onChange={(e) =>
+                    <button
+                      onClick={() =>
                         updateSelectedElements((el) => ({
                           ...el,
-                          color: e.target.value,
+                          backgroundColor: undefined,
                         }))
                       }
-                      className="w-full h-8 rounded cursor-pointer"
-                    />
+                      className="text-[10px] text-blue-600 hover:underline cursor-pointer"
+                    >
+                      {lang === 'hi' ? 'पारदर्शी (Clear)' : 'Transparent'}
+                    </button>
                   </div>
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">
-                      {lang === 'hi' ? 'बॉक्स बैकग्राउंड' : 'Box Background'}
-                    </label>
-                    <div className="flex items-center gap-1">
-                      <input
-                        type="color"
-                        value={
-                          selectedElement.backgroundColor &&
-                          selectedElement.backgroundColor.startsWith('#')
-                            ? selectedElement.backgroundColor
-                            : '#FFFFFF'
-                        }
-                        onChange={(e) =>
-                          updateSelectedElements((el) => ({
-                            ...el,
-                            backgroundColor: e.target.value,
-                          }))
-                        }
-                        className="flex-1 h-8 rounded cursor-pointer"
-                      />
-                      <button
-                        onClick={() =>
-                          updateSelectedElements((el) => ({
-                            ...el,
-                            backgroundColor: undefined,
-                          }))
-                        }
-                        className="px-2 py-1 text-[10px] rounded bg-slate-200 dark:bg-slate-700 font-bold"
-                        title="Clear Background"
-                      >
-                        Clear
-                      </button>
-                    </div>
-                  </div>
+                  <input
+                    type="color"
+                    value={selectedElement.backgroundColor || '#FFFFFF'}
+                    onChange={(e) =>
+                      updateSelectedElements((el) => ({
+                        ...el,
+                        backgroundColor: e.target.value,
+                      }))
+                    }
+                    className="w-full h-8 rounded-lg cursor-pointer"
+                  />
                 </div>
 
-                {/* Border Width, Radius & Color */}
+                {/* Border Width & Radius */}
                 <div className="grid grid-cols-3 gap-2">
                   <div>
                     <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">
-                      {lang === 'hi' ? 'बॉर्डर चौड़ाई' : 'Border px'}
+                      {lang === 'hi' ? 'बॉर्डर मोटाई' : 'Border px'}
                     </label>
                     <input
                       type="number"
@@ -1874,46 +2045,6 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
                   </div>
                 </div>
 
-                {/* Rotation & Opacity */}
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">
-                      {lang === 'hi' ? 'घुमाव (Rotation °)' : 'Rotation (°)'}
-                    </label>
-                    <input
-                      type="number"
-                      min={-180}
-                      max={180}
-                      value={selectedElement.rotation || 0}
-                      onChange={(e) =>
-                        updateSelectedElements((el) => ({
-                          ...el,
-                          rotation: Number(e.target.value),
-                        }))
-                      }
-                      className="w-full px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-bold"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">
-                      {lang === 'hi' ? 'अपारदर्शिता (Opacity)' : 'Opacity (%)'}
-                    </label>
-                    <input
-                      type="number"
-                      min={10}
-                      max={100}
-                      value={Math.round((selectedElement.opacity ?? 1) * 100)}
-                      onChange={(e) =>
-                        updateSelectedElements((el) => ({
-                          ...el,
-                          opacity: Math.min(1, Math.max(0.1, Number(e.target.value) / 100)),
-                        }))
-                      }
-                      className="w-full px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-bold"
-                    />
-                  </div>
-                </div>
-
                 {/* Position X, Y, Width, Height */}
                 <div className="grid grid-cols-4 gap-1.5 pt-2 border-t border-slate-200 dark:border-slate-800">
                   <div>
@@ -1922,7 +2053,10 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
                       type="number"
                       value={selectedElement.x}
                       onChange={(e) =>
-                        updateSelectedElements((el) => ({ ...el, x: Number(e.target.value) }))
+                        updateSelectedElements((el) => ({
+                          ...el,
+                          x: Number(e.target.value),
+                        }))
                       }
                       className="w-full px-1.5 py-1 rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-mono"
                     />
@@ -1933,7 +2067,10 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
                       type="number"
                       value={selectedElement.y}
                       onChange={(e) =>
-                        updateSelectedElements((el) => ({ ...el, y: Number(e.target.value) }))
+                        updateSelectedElements((el) => ({
+                          ...el,
+                          y: Number(e.target.value),
+                        }))
                       }
                       className="w-full px-1.5 py-1 rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-mono"
                     />
@@ -1975,30 +2112,38 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
 
       {/* FULL-SCREEN PREVIEW MODAL */}
       {showPreviewModal && (
-        <div className="fixed inset-0 z-50 bg-black/85 flex flex-col items-center justify-center p-4">
-          <div className="w-full max-w-5xl flex items-center justify-between text-white mb-3">
-            <div>
-              <h3 className="text-base font-bold">{doc.nameHi || doc.name}</h3>
-              <p className="text-xs text-slate-400">
-                {doc.width} × {doc.height} px — Jale Cricket Studio Live Preview
+        <div className="fixed inset-0 z-50 bg-black/85 flex flex-col items-center justify-center p-3 sm:p-4">
+          <div className="w-full max-w-5xl flex flex-wrap items-center justify-between gap-2 text-white mb-3">
+            <div className="min-w-0">
+              <h3 className="text-sm sm:text-base font-bold truncate">
+                {doc.nameHi || doc.name}
+              </h3>
+              <p className="text-[11px] text-slate-400">
+                {doc.width} × {doc.height} px — Ultra-HD Live Preview
               </p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
               <button
                 onClick={() => handleExport('pdf')}
-                className="px-3.5 py-1.5 rounded-lg bg-red-600 hover:bg-red-500 text-white text-xs font-bold cursor-pointer"
+                className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-500 text-white text-xs font-bold cursor-pointer"
               >
-                Download PDF
+                HD PDF
               </button>
               <button
                 onClick={() => handleExport('png')}
-                className="px-3.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold cursor-pointer"
+                className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold cursor-pointer"
               >
-                Download PNG
+                HD PNG
+              </button>
+              <button
+                onClick={() => handleExport('jpg')}
+                className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold cursor-pointer"
+              >
+                HD JPG
               </button>
               <button
                 onClick={() => setShowPreviewModal(false)}
-                className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-white cursor-pointer"
+                className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -2007,8 +2152,8 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
           <div className="flex-1 w-full flex items-center justify-center overflow-auto">
             <div
               style={{
-                width: doc.width * 0.55,
-                height: doc.height * 0.55,
+                width: Math.round(doc.width * computeIdealZoom(doc)),
+                height: Math.round(doc.height * computeIdealZoom(doc)),
               }}
               className="relative shadow-2xl"
             >
@@ -2016,7 +2161,7 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
                 style={{
                   width: doc.width,
                   height: doc.height,
-                  transform: 'scale(0.55)',
+                  transform: `scale(${computeIdealZoom(doc)})`,
                   transformOrigin: 'top left',
                   backgroundColor: doc.backgroundColor || '#FFFFFF',
                   backgroundImage: doc.backgroundGradient || 'none',
@@ -2028,9 +2173,10 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
               >
                 {doc.elements.map((el) => {
                   const stickerUrl =
-                    el.type === 'sticker' && el.stickerId
+                    el.imageUrl ||
+                    (el.type === 'sticker' && el.stickerId
                       ? getStickerDataUrl(el.stickerId)
-                      : el.imageUrl;
+                      : undefined);
                   return (
                     <div
                       key={el.id}

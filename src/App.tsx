@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 import { CanvasEditor } from './components/CanvasEditor';
 import { DashboardHomeView } from './components/DashboardHomeView';
+import { HDExportModal } from './components/HDExportModal';
 import {
   BackupRestoreView,
   MediaLibraryView,
@@ -37,7 +38,7 @@ import {
   TemplateLibraryView,
 } from './components/LibraryAndSystemViews';
 import { MatchManagerView } from './components/MatchManagerView';
-import { OfflineIndicator, PWAInstallButton } from './components/PWAInstallPrompt';
+import { OfflineIndicator } from './components/PWAInstallPrompt';
 import { PlayerManagerView } from './components/PlayerManagerView';
 import { TournamentProfileView } from './components/TournamentProfileView';
 import {
@@ -48,6 +49,7 @@ import {
   DEFAULT_SCORECARDS,
   DEFAULT_TOURNAMENT_PROFILES,
   buildMasterTemplates,
+  syncProfileToDesign,
 } from './data/defaultTemplates';
 import {
   DesignDocument,
@@ -96,7 +98,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'saved-designs', labelHi: '15. मेरे सेव डिज़ाइन', labelEn: '15. My Saved Designs', icon: FolderHeart },
   { id: 'media-library', labelHi: '16. मीडिया व लोगो लाइब्रेरी', labelEn: '16. Media & Logo Library', icon: ImageIcon },
   { id: 'backup-restore', labelHi: '17. बैकअप और रीस्टोर', labelEn: '17. Backup & Restore', icon: Database },
-  { id: 'settings', labelHi: '18. सेटिंग्स (Settings)', labelEn: '18. Settings & APK', icon: Settings },
+  { id: 'settings', labelHi: '18. सेटिंग्स (Settings)', labelEn: '18. Settings', icon: Settings },
 ];
 
 export default function App() {
@@ -181,7 +183,6 @@ export default function App() {
     window.history.pushState({ section }, '', `#${section}`);
     setSidebarOpen(false);
 
-    // Map maker sections directly to their default template in CanvasEditor
     const makerCategoryMap: Partial<
       Record<WorkspaceSection, { cat: TemplateCategory; defaultTplId: string }>
     > = {
@@ -239,6 +240,33 @@ export default function App() {
     setProfiles(nextProfiles);
     idbSaveAll('profiles', nextProfiles);
     handleUpdateSettings({ ...settings, activeProfileId: activeId });
+
+    // Also dynamically sync savedDesigns & customTemplates with updated active profile
+    const updatedActive =
+      nextProfiles.find((p) => p.id === activeId) || nextProfiles[0];
+    if (updatedActive) {
+      if (savedDesigns.length > 0) {
+        const syncedSaved = savedDesigns.map((d) =>
+          syncProfileToDesign(d, updatedActive)
+        );
+        setSavedDesigns(syncedSaved);
+        idbSaveAll('savedDesigns', syncedSaved);
+      }
+      if (customTemplates.length > 0) {
+        const syncedCustom = customTemplates.map((t) =>
+          syncProfileToDesign(t, updatedActive)
+        );
+        setCustomTemplates(syncedCustom);
+        idbSaveAll('customTemplates', syncedCustom);
+      }
+    }
+  };
+
+  const handleQuickUpdateProfile = (updatedProfile: TournamentProfile) => {
+    const nextProfiles = profiles.map((p) =>
+      p.id === updatedProfile.id ? updatedProfile : p
+    );
+    handleSaveProfiles(nextProfiles, updatedProfile.id);
   };
 
   const handleSaveDesign = (doc: DesignDocument, asTemplate?: boolean) => {
@@ -342,7 +370,7 @@ export default function App() {
     activeSection === 'letter-maker';
 
   const fullBackupObject: FullStudioBackup = {
-    appVersion: '2.0.0',
+    appVersion: '3.0.0',
     exportedAt: new Date().toISOString(),
     settings,
     profiles,
@@ -356,32 +384,34 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
-      {/* TOP BAR CONTRACT: 3 Zones (Brand Wordmark — 4 Concise Nav Links — 1 Primary Action) */}
-      <header className="sticky top-0 z-30 h-[60px] flex items-center justify-between gap-6 px-4 sm:px-6 bg-[#0B192C] text-white border-b border-slate-800 shrink-0">
-        {/* Zone 1: Brand Title */}
-        <div className="flex items-center gap-3 shrink-0">
+    <div className="min-h-screen w-full max-w-[100vw] overflow-x-hidden flex flex-col bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
+      {/* TOP BAR: Clean, zero-overflow mobile header without side APK button */}
+      <header className="sticky top-0 z-30 h-14 flex items-center justify-between gap-2 px-3 sm:px-6 bg-[#0B192C] text-white border-b border-slate-800 shrink-0 w-full overflow-hidden">
+        {/* Zone 1: Menu + Brand Title */}
+        <div className="flex items-center gap-2 min-w-0">
           <button
             onClick={() => setSidebarOpen(!sidebarOpen)}
-            className="p-2 rounded-lg text-slate-200 hover:bg-slate-800 cursor-pointer"
+            className="p-2 rounded-lg text-slate-200 hover:bg-slate-800 cursor-pointer shrink-0"
             aria-label="Toggle Menu"
           >
             <Menu className="w-5 h-5" />
           </button>
           <button
             onClick={() => handleNavigate('dashboard')}
-            className="text-base sm:text-lg font-black tracking-wider text-amber-400 whitespace-nowrap shrink-0 cursor-pointer"
+            className="text-sm sm:text-lg font-black tracking-wide text-amber-400 truncate cursor-pointer text-left"
           >
             JALE CRICKET STUDIO
           </button>
         </div>
 
-        {/* Zone 2: 5 Concise Single-Line Navigation Links */}
+        {/* Zone 2: Desktop Navigation Links */}
         <nav className="hidden lg:flex items-center gap-6 text-xs font-bold text-slate-200">
           <button
             onClick={() => handleNavigate('dashboard')}
             className={`hover:text-amber-400 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-              activeSection === 'dashboard' ? 'text-amber-400 underline underline-offset-4' : ''
+              activeSection === 'dashboard'
+                ? 'text-amber-400 underline underline-offset-4'
+                : ''
             }`}
           >
             {lang === 'hi' ? 'डैशबोर्ड' : 'Dashboard'}
@@ -389,7 +419,9 @@ export default function App() {
           <button
             onClick={() => handleNavigate('tournament-profile')}
             className={`hover:text-amber-400 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-              activeSection === 'tournament-profile' ? 'text-amber-400 underline underline-offset-4' : ''
+              activeSection === 'tournament-profile'
+                ? 'text-amber-400 underline underline-offset-4'
+                : ''
             }`}
           >
             {lang === 'hi' ? 'टूर्नामेंट प्रोफाइल' : 'Tournament Profile'}
@@ -397,7 +429,9 @@ export default function App() {
           <button
             onClick={() => handleNavigate('poster-maker')}
             className={`hover:text-amber-400 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-              isCanvasMakerSection ? 'text-amber-400 underline underline-offset-4' : ''
+              isCanvasMakerSection
+                ? 'text-amber-400 underline underline-offset-4'
+                : ''
             }`}
           >
             {lang === 'hi' ? 'डिज़ाइन स्टूडियो' : 'Design Editor'}
@@ -405,7 +439,9 @@ export default function App() {
           <button
             onClick={() => handleNavigate('player-list-maker')}
             className={`hover:text-amber-400 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-              activeSection === 'player-list-maker' ? 'text-amber-400 underline underline-offset-4' : ''
+              activeSection === 'player-list-maker'
+                ? 'text-amber-400 underline underline-offset-4'
+                : ''
             }`}
           >
             {lang === 'hi' ? 'खिलाड़ी प्रबंधन' : 'Players'}
@@ -413,15 +449,25 @@ export default function App() {
           <button
             onClick={() => handleNavigate('template-library')}
             className={`hover:text-amber-400 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-              activeSection === 'template-library' ? 'text-amber-400 underline underline-offset-4' : ''
+              activeSection === 'template-library'
+                ? 'text-amber-400 underline underline-offset-4'
+                : ''
             }`}
           >
             {lang === 'hi' ? 'टेम्पलेट्स' : 'Templates'}
           </button>
         </nav>
 
-        {/* Zone 3: Language Switch & Primary Action */}
-        <div className="flex items-center gap-2 shrink-0">
+        {/* Zone 3: Language Switch & Quick Profile Button */}
+        <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            onClick={() => handleNavigate('tournament-profile')}
+            className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/30 text-amber-300 text-xs font-bold cursor-pointer"
+          >
+            <Shield className="w-3.5 h-3.5" />
+            <span>{lang === 'hi' ? 'प्रोफाइल / लोगो' : 'Profile / Logo'}</span>
+          </button>
+
           <button
             onClick={() =>
               handleUpdateSettings({
@@ -429,22 +475,17 @@ export default function App() {
                 language: lang === 'hi' ? 'en' : 'hi',
               })
             }
-            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-200 whitespace-nowrap shrink-0 cursor-pointer"
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-200 whitespace-nowrap shrink-0 cursor-pointer border border-slate-700"
             title="Switch Hindi / English"
           >
-            <Globe className="w-3.5 h-3.5 text-amber-400" />
+            <Globe className="w-3.5 h-3.5 text-amber-400 shrink-0" />
             <span>{lang === 'hi' ? 'हिंदी / EN' : 'EN / हिंदी'}</span>
           </button>
-
-          <PWAInstallButton
-            lang={lang}
-            onOpenApkGuide={() => handleNavigate('settings')}
-          />
         </div>
       </header>
 
       {/* MAIN WORKSPACE BODY WITH SIDEBAR DRAWER */}
-      <div className="flex flex-1 min-h-0 relative">
+      <div className="flex flex-1 min-h-0 relative w-full overflow-x-hidden">
         {/* Sidebar Overlay on Mobile/Desktop when toggled */}
         {sidebarOpen && (
           <div
@@ -457,7 +498,7 @@ export default function App() {
         <aside
           className={`${
             sidebarOpen
-              ? 'fixed inset-y-0 left-0 z-50 flex w-72'
+              ? 'fixed inset-y-0 left-0 z-50 flex w-72 max-w-[85vw]'
               : 'hidden xl:flex w-64'
           } flex-col bg-[#0B192C] text-slate-200 border-r border-slate-800 shrink-0 overflow-y-auto`}
         >
@@ -498,7 +539,7 @@ export default function App() {
         </aside>
 
         {/* ACTIVE WORKSPACE VIEWPORT */}
-        <div className="flex-1 min-w-0 pb-16 lg:pb-0 overflow-y-auto">
+        <div className="flex-1 min-w-0 w-full pb-16 lg:pb-0 overflow-y-auto overflow-x-hidden">
           {activeSection === 'dashboard' && (
             <DashboardHomeView
               lang={lang}
@@ -511,6 +552,7 @@ export default function App() {
               onSelectProfile={(id) =>
                 handleUpdateSettings({ ...settings, activeProfileId: id })
               }
+              onQuickUpdateProfile={handleQuickUpdateProfile}
               onNavigate={handleNavigate}
               onOpenTemplateInEditor={handleOpenTemplateInEditor}
             />
@@ -538,6 +580,7 @@ export default function App() {
               categoryFilter={editorCatFilter}
               onSaveDesign={handleSaveDesign}
               onUploadMedia={handleAddSingleMedia}
+              onQuickUpdateProfile={handleQuickUpdateProfile}
             />
           )}
 
@@ -640,7 +683,7 @@ export default function App() {
         </div>
       </div>
 
-      {/* MOBILE BOTTOM NAVIGATION BAR (Natural Thumb Zone, <= 15% height) */}
+      {/* MOBILE BOTTOM NAVIGATION BAR */}
       {!isCanvasMakerSection && (
         <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-30 h-14 bg-[#0B192C]/95 backdrop-blur-md border-t border-slate-800 grid grid-cols-5 items-center text-slate-300">
           {[
@@ -669,6 +712,9 @@ export default function App() {
           })}
         </nav>
       )}
+
+      {/* Interactive Ultra-HD Download & Native Share Modal */}
+      <HDExportModal lang={lang} />
 
       {/* Offline Status Toast */}
       <OfflineIndicator lang={lang} />
