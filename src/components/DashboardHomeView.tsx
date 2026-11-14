@@ -31,6 +31,7 @@ import {
   PlayerRecord,
   TournamentProfile,
   WorkspaceSection,
+  t3,
 } from '../types/studio';
 import { exportDesignDocument } from '../utils/exportEngine';
 import { DesignMiniPreview } from './DesignMiniPreview';
@@ -67,6 +68,8 @@ export const DashboardHomeView: React.FC<DashboardHomeViewProps> = ({
   const [quickToast, setQuickToast] = useState<string | null>(null);
   const [selectedCat, setSelectedCat] = useState<string>('ALL');
 
+  const isHiOrMix = lang === 'hi' || lang === 'mix';
+
   const triggerFeedback = (id: string, toastMessage?: string) => {
     setDoneActionId(id);
     if (toastMessage) {
@@ -95,7 +98,7 @@ export const DashboardHomeView: React.FC<DashboardHomeViewProps> = ({
       });
       triggerFeedback(
         field,
-        lang === 'hi'
+        isHiOrMix
           ? field === 'tournamentLogo'
             ? '✓ टूर्नामेंट लोगो सफलतापूर्वक अपडेट हो गया! सभी टेम्पलेट्स में नया लोगो लग गया है।'
             : '✓ अध्यक्ष/आयोजक हस्ताक्षर अपडेट हो गया! सभी वाउचर व पत्रों में नया साइन लग गया है।'
@@ -131,6 +134,7 @@ export const DashboardHomeView: React.FC<DashboardHomeViewProps> = ({
     section: WorkspaceSection;
     titleHi: string;
     titleEn: string;
+    titleMix: string;
     descHi: string;
     descEn: string;
     icon: React.ElementType;
@@ -138,17 +142,19 @@ export const DashboardHomeView: React.FC<DashboardHomeViewProps> = ({
   }[] = [
     {
       section: 'fb-live-studio',
-      titleHi: '🔴 फेसबुक लाइव & 2-मोबाइल कंट्रोलर',
+      titleHi: '🔴 फेसबुक लाइव व 2-मोबाइल कंट्रोलर',
       titleEn: '🔴 FB Live & 2-Mobile Studio',
-      descHi: 'बिना OBS के मोबाइल से लाइव चलाएं और दूसरे फोन से स्कोर, 15-खिलाड़ी सूची व ऑटो-विज्ञापन बदलें',
+      titleMix: '🔴 फेसबुक लाइव & 2-मोबाइल कंट्रोलर (FB Live)',
+      descHi: 'बिना ओबीएस के मोबाइल से लाइव चलाएं और दूसरे फोन से स्कोर, 15-खिलाड़ी सूची व ऑटो-विज्ञापन बदलें',
       descEn: '2-Mobile real-time live score overlay, 15-player squad TV display & automatic rotating ads',
       icon: Radio,
       accentClass: 'bg-red-600 text-white animate-pulse',
     },
     {
       section: 'poster-maker',
-      titleHi: 'पोस्टर और बैनर मेकर',
+      titleHi: 'पोस्टर और बैनर निर्माता',
       titleEn: 'Poster & Banner Maker',
+      titleMix: 'पोस्टर और बैनर मेकर (Poster Maker)',
       descHi: 'टूर्नामेंट मुख्य पोस्टर, फाइनल पोस्टर, मैच डे और विजेता पोस्टर',
       descEn: 'Tournament posters, grand final banners, match day & winner posters',
       icon: Palette,
@@ -156,8 +162,9 @@ export const DashboardHomeView: React.FC<DashboardHomeViewProps> = ({
     },
     {
       section: 'invitation-maker',
-      titleHi: 'आमंत्रण कार्ड मेकर',
+      titleHi: 'आमंत्रण पत्र निर्माता',
       titleEn: 'Invitation Card Maker',
+      titleMix: 'आमंत्रण कार्ड मेकर (Invitation)',
       descHi: 'मुख्य अतिथि, विशिष्ट अतिथि, उद्घाटन एवं फाइनल मैच आमंत्रण पत्र',
       descEn: 'Chief guest, special guest, opening & final match invitation cards',
       icon: Mail,
@@ -165,8 +172,9 @@ export const DashboardHomeView: React.FC<DashboardHomeViewProps> = ({
     },
     {
       section: 'player-list-maker',
-      titleHi: '8-टीम & 15-खिलाड़ी सूची मेकर',
+      titleHi: '8-टीम एवं 15-खिलाड़ी सूची',
       titleEn: '8-Team & 15-Player List Maker',
+      titleMix: '8-टीम & 15-खिलाड़ी सूची (Team Squads)',
       descHi: '8 टीमों के 15-खिलाड़ियों के नाम, अलग-अलग डेली फेसबुक पोस्ट टेम्पलेट्स व प्रिंट फॉर्म',
       descEn: '8-team 15-player rosters, daily Facebook post templates & printable form',
       icon: Users,
@@ -174,8 +182,9 @@ export const DashboardHomeView: React.FC<DashboardHomeViewProps> = ({
     },
     {
       section: 'voucher-maker',
-      titleHi: 'प्राइज वाउचर व चेक मेकर',
+      titleHi: 'पुरस्कार वाउचर व चेक निर्माता',
       titleEn: 'Prize Voucher & Cheque Maker',
+      titleMix: 'प्राइज वाउचर व चेक मेकर (Cheque)',
       descHi: 'मैन ऑफ द सीरीज, मैन ऑफ द मैच और विजेता बैंक चेक वाउचर',
       descEn: 'Man of the Series, MOM & Winner giant prize cheque vouchers',
       icon: CreditCard,
@@ -183,8 +192,9 @@ export const DashboardHomeView: React.FC<DashboardHomeViewProps> = ({
     },
     {
       section: 'letter-maker',
-      titleHi: 'आधिकारिक आवेदन पत्र मेकर',
+      titleHi: 'आधिकारिक आवेदन पत्र निर्माता',
       titleEn: 'Official Letter Maker',
+      titleMix: 'आधिकारिक आवेदन पत्र (Official Letters)',
       descHi: 'प्रधानाचार्य मैदान अनुमति पत्र एवं थाना अध्यक्ष शांति व्यवस्था सूचना पत्र',
       descEn: 'College ground permission & Police Station SHO intimation letters',
       icon: FileText,
@@ -192,8 +202,9 @@ export const DashboardHomeView: React.FC<DashboardHomeViewProps> = ({
     },
     {
       section: 'certificate-maker',
-      titleHi: 'सर्टिफिकेट (प्रमाण-पत्र) मेकर',
+      titleHi: 'प्रमाण-पत्र (सर्टिफिकेट) निर्माता',
       titleEn: 'Certificate Maker',
+      titleMix: 'सर्टिफिकेट (प्रमाण-पत्र) मेकर',
       descHi: 'विजेता, उप-विजेता, मैन ऑफ द मैच, सीरीज एवं सहभागिता प्रमाण-पत्र',
       descEn: 'Winner, Runner-up, MOM, MOS, Best Batsman & Bowler certificates',
       icon: Award,
@@ -201,8 +212,9 @@ export const DashboardHomeView: React.FC<DashboardHomeViewProps> = ({
     },
     {
       section: 'rules-maker',
-      titleHi: 'नियम व शर्तें मेकर',
+      titleHi: 'नियम व शर्तें निर्माता',
       titleEn: 'Rules & Regulations Maker',
+      titleMix: 'नियम व शर्तें मेकर (Rules)',
       descHi: 'टूर्नामेंट के 10 मुख्य नियम, अनुशासन व शतक इनाम की नियमावली',
       descEn: 'Official tournament rules, discipline policies & century rewards',
       icon: ScrollText,
@@ -210,8 +222,9 @@ export const DashboardHomeView: React.FC<DashboardHomeViewProps> = ({
     },
     {
       section: 'prize-maker',
-      titleHi: 'पुरस्कार वितरण शीट मेकर',
+      titleHi: 'पुरस्कार वितरण तालिका',
       titleEn: 'Prize Distribution Maker',
+      titleMix: 'पुरस्कार वितरण शीट मेकर (Prizes)',
       descHi: 'प्रथम, द्वितीय, तृतीय व सभी व्यक्तिगत पुरस्कारों की आधिकारिक सूची',
       descEn: 'Complete prize breakdown sheet for final ceremony distribution',
       icon: Trophy,
@@ -219,8 +232,9 @@ export const DashboardHomeView: React.FC<DashboardHomeViewProps> = ({
     },
     {
       section: 'schedule-maker',
-      titleHi: 'मैच शेड्यूल (समय-सारणी)',
+      titleHi: 'मैच समय-सारणी निर्माता',
       titleEn: 'Match Schedule Maker',
+      titleMix: 'मैच शेड्यूल (समय-सारणी / Schedule)',
       descHi: 'लीग, क्वार्टर, सेमीफाइनल और ग्रैंड फाइनल की समय-सारणी व PDF',
       descEn: 'League, Semi-Final & Grand Final match fixtures and PDF export',
       icon: Calendar,
@@ -228,8 +242,9 @@ export const DashboardHomeView: React.FC<DashboardHomeViewProps> = ({
     },
     {
       section: 'result-maker',
-      titleHi: 'मैच रिजल्ट (परिणाम) मेकर',
+      titleHi: 'मैच परिणाम (रिजल्ट) निर्माता',
       titleEn: 'Match Result Maker',
+      titleMix: 'मैच रिजल्ट (परिणाम) मेकर',
       descHi: 'दोनों टीमों का स्कोर, विजेता अंतर और मैन ऑफ द मैच पोस्टर/शीट',
       descEn: 'Team scores, winning margin & Man of the Match result cards',
       icon: FileCheck,
@@ -237,8 +252,9 @@ export const DashboardHomeView: React.FC<DashboardHomeViewProps> = ({
     },
     {
       section: 'scorecard-maker',
-      titleHi: 'फुल स्कोरकार्ड मेकर',
+      titleHi: 'पूर्ण स्कोरकार्ड निर्माता',
       titleEn: 'Full Scorecard Maker',
+      titleMix: 'फुल स्कोरकार्ड मेकर (Scorecard)',
       descHi: 'बल्लेबाजों के रन/चौके/छक्के व गेंदबाजों के ओवर/विकेट का पूरा रिकॉर्ड',
       descEn: 'Full batting & bowling statistics table with automatic strike rate',
       icon: ClipboardList,
@@ -248,6 +264,7 @@ export const DashboardHomeView: React.FC<DashboardHomeViewProps> = ({
       section: 'tournament-profile',
       titleHi: 'टूर्नामेंट प्रोफाइल सेटअप',
       titleEn: 'Tournament Profile Setup',
+      titleMix: 'टूर्नामेंट प्रोफाइल सेटअप (Profile)',
       descHi: 'सीजन, तारीख, मैदान, इनाम व अध्यक्ष का नाम एक जगह से अपडेट करें',
       descEn: 'Central tournament profile that auto-fills all designs & templates',
       icon: Shield,
@@ -289,7 +306,7 @@ export const DashboardHomeView: React.FC<DashboardHomeViewProps> = ({
             <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-start">
               <label
                 role="button"
-                title={lang === 'hi' ? 'लोगो बदलने के लिए क्लिक करें' : 'Click to Change Tournament Logo'}
+                title={isHiOrMix ? 'लोगो बदलने के लिए क्लिक करें' : 'Click to Change Tournament Logo'}
                 className="relative group w-20 h-20 sm:w-24 sm:h-24 rounded-2xl bg-slate-950/90 p-1.5 border-2 border-amber-400 shrink-0 cursor-pointer overflow-hidden shadow-lg"
               >
                 <img
@@ -300,7 +317,7 @@ export const DashboardHomeView: React.FC<DashboardHomeViewProps> = ({
                 />
                 <div className="absolute inset-x-0 bottom-0 bg-amber-500/95 text-slate-950 text-[9px] font-black py-0.5 text-center flex items-center justify-center gap-0.5">
                   <Camera className="w-2.5 h-2.5" />
-                  <span>{lang === 'hi' ? 'लोगो बदलें' : 'LOGO'}</span>
+                  <span>{isHiOrMix ? 'लोगो बदलें' : 'LOGO'}</span>
                 </div>
                 <input
                   type="file"
@@ -327,10 +344,10 @@ export const DashboardHomeView: React.FC<DashboardHomeViewProps> = ({
                   )}
                   <span>
                     {doneActionId === 'tournamentLogo'
-                      ? lang === 'hi'
+                      ? isHiOrMix
                         ? 'लोगो अपडेट हुआ!'
                         : 'Logo Updated!'
-                      : lang === 'hi'
+                      : isHiOrMix
                       ? 'लोगो अपलोड'
                       : 'Upload Logo'}
                   </span>
@@ -357,10 +374,10 @@ export const DashboardHomeView: React.FC<DashboardHomeViewProps> = ({
                   )}
                   <span>
                     {doneActionId === 'signatureImage'
-                      ? lang === 'hi'
+                      ? isHiOrMix
                         ? 'साइन अपडेट हुआ!'
                         : 'Sign Updated!'
-                      : lang === 'hi'
+                      : isHiOrMix
                       ? 'हस्ताक्षर (Sign) बदलें'
                       : 'Upload Sign'}
                   </span>
@@ -392,11 +409,11 @@ export const DashboardHomeView: React.FC<DashboardHomeViewProps> = ({
               </h1>
 
               <p className="text-xs sm:text-sm text-blue-100 font-semibold break-words leading-relaxed">
-                📍 स्थान: {activeProfile.venue} · ⏰ समय: {activeProfile.matchTime}
+                📍 {t3(lang, 'स्थान', 'Venue', 'स्थान')}: {activeProfile.venue} · ⏰ {t3(lang, 'समय', 'Time', 'समय')}: {activeProfile.matchTime}
               </p>
 
               <p className="text-xs text-amber-300/95 font-bold break-words">
-                👤 अध्यक्ष: {activeProfile.presidentName} · 📞 संपर्क: {activeProfile.contactNumber}
+                👤 {t3(lang, 'अध्यक्ष', 'President', 'अध्यक्ष')}: {activeProfile.presidentName} · 📞 {t3(lang, 'संपर्क', 'Contact', 'संपर्क')}: {activeProfile.contactNumber}
               </p>
             </div>
           </div>
@@ -406,7 +423,7 @@ export const DashboardHomeView: React.FC<DashboardHomeViewProps> = ({
             {/* Active Season Selector — Constrained so it never overflows mobile */}
             <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 w-full lg:w-80 min-w-0">
               <span className="text-xs font-bold text-slate-300 shrink-0">
-                {lang === 'hi' ? 'सक्रिय सीजन:' : 'Active Season:'}
+                {t3(lang, 'सक्रिय सीजन:', 'Active Season:', 'सक्रिय Season:')}
               </span>
               <select
                 value={activeProfile.id}
@@ -414,7 +431,7 @@ export const DashboardHomeView: React.FC<DashboardHomeViewProps> = ({
                   onSelectProfile(e.target.value);
                   triggerFeedback(
                     'season-switch',
-                    lang === 'hi'
+                    isHiOrMix
                       ? '✓ सीजन बदल गया! सभी टेम्पलेट्स अपडेट हो गए हैं।'
                       : '✓ Active season switched!'
                   );
@@ -446,12 +463,10 @@ export const DashboardHomeView: React.FC<DashboardHomeViewProps> = ({
                 )}
                 <span>
                   {doneActionId === 'tournamentLogo'
-                    ? lang === 'hi'
+                    ? isHiOrMix
                       ? '✓ लोगो अपडेट हो गया'
                       : '✓ Logo Updated'
-                    : lang === 'hi'
-                    ? 'लोगो बदलें (Logo)'
-                    : 'Change Logo'}
+                    : t3(lang, 'लोगो बदलें', 'Change Logo', 'लोगो बदलें (Logo)')}
                 </span>
                 <input
                   type="file"
@@ -476,12 +491,10 @@ export const DashboardHomeView: React.FC<DashboardHomeViewProps> = ({
                 )}
                 <span>
                   {doneActionId === 'signatureImage'
-                    ? lang === 'hi'
+                    ? isHiOrMix
                       ? '✓ साइन अपडेट हो गया'
                       : '✓ Sign Updated'
-                    : lang === 'hi'
-                    ? 'हस्ताक्षर बदलें (Sign)'
-                    : 'Change Signature'}
+                    : t3(lang, 'हस्ताक्षर बदलें', 'Change Signature', 'हस्ताक्षर बदलें (Sign)')}
                 </span>
                 <input
                   type="file"
@@ -500,9 +513,7 @@ export const DashboardHomeView: React.FC<DashboardHomeViewProps> = ({
               >
                 <Radio className="w-3.5 h-3.5 shrink-0 animate-pulse" />
                 <span className="truncate">
-                  {lang === 'hi'
-                    ? '🔴 FB Live 2-मोबाइल स्टूडियो'
-                    : '🔴 FB Live 2-Mobile Studio'}
+                  {t3(lang, '🔴 फेसबुक लाइव स्टूडियो', '🔴 FB Live 2-Mobile Studio', '🔴 FB Live 2-मोबाइल स्टूडियो')}
                 </span>
               </button>
               <button
@@ -511,7 +522,7 @@ export const DashboardHomeView: React.FC<DashboardHomeViewProps> = ({
               >
                 <Palette className="w-3.5 h-3.5 shrink-0" />
                 <span className="truncate">
-                  {lang === 'hi' ? 'मुख्य पोस्टर एडिट करें' : 'Edit Main Poster'}
+                  {t3(lang, 'मुख्य पोस्टर संपादित करें', 'Edit Main Poster', 'मुख्य पोस्टर एडिट करें')}
                 </span>
               </button>
               <button
@@ -520,7 +531,7 @@ export const DashboardHomeView: React.FC<DashboardHomeViewProps> = ({
               >
                 <Edit3 className="w-3.5 h-3.5 shrink-0" />
                 <span className="truncate">
-                  {lang === 'hi' ? 'प्रोफाइल अपडेट करें' : 'Edit Profile'}
+                  {t3(lang, 'प्रोफाइल अपडेट करें', 'Edit Profile', 'प्रोफाइल Edit करें')}
                 </span>
               </button>
             </div>
@@ -531,7 +542,7 @@ export const DashboardHomeView: React.FC<DashboardHomeViewProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3 mt-5 pt-5 border-t border-white/15">
           <div className="bg-slate-950/55 rounded-xl p-3 sm:p-3.5 border border-amber-400/25">
             <div className="text-[11px] font-extrabold text-amber-300 uppercase tracking-wide">
-              🏆 {lang === 'hi' ? 'प्रथम पुरस्कार (WINNER PRIZE)' : 'WINNER PRIZE'}
+              🏆 {t3(lang, 'प्रथम पुरस्कार', 'WINNER PRIZE', 'प्रथम पुरस्कार (WINNER PRIZE)')}
             </div>
             <div className="text-base sm:text-lg font-black text-white mt-0.5 break-words leading-snug">
               ₹ {activeProfile.winnerPrize}
@@ -540,7 +551,7 @@ export const DashboardHomeView: React.FC<DashboardHomeViewProps> = ({
 
           <div className="bg-slate-950/55 rounded-xl p-3 sm:p-3.5 border border-sky-400/25">
             <div className="text-[11px] font-extrabold text-sky-300 uppercase tracking-wide">
-              🥈 {lang === 'hi' ? 'उप-विजेता (RUNNER-UP PRIZE)' : 'RUNNER-UP PRIZE'}
+              🥈 {t3(lang, 'उप-विजेता पुरस्कार', 'RUNNER-UP PRIZE', 'उप-विजेता (RUNNER-UP PRIZE)')}
             </div>
             <div className="text-base sm:text-lg font-black text-white mt-0.5 break-words leading-snug">
               ₹ {activeProfile.runnerUpPrize}
@@ -549,7 +560,7 @@ export const DashboardHomeView: React.FC<DashboardHomeViewProps> = ({
 
           <div className="bg-slate-950/55 rounded-xl p-3 sm:p-3.5 border border-emerald-400/25">
             <div className="text-[11px] font-extrabold text-emerald-300 uppercase tracking-wide">
-              ⭐ {lang === 'hi' ? 'मैन ऑफ द सीरीज (MOS PRIZE)' : 'MAN OF THE SERIES'}
+              ⭐ {t3(lang, 'मैन ऑफ द सीरीज', 'MAN OF THE SERIES', 'मैन ऑफ द सीरीज (MOS PRIZE)')}
             </div>
             <div className="text-sm sm:text-base font-black text-white mt-0.5 break-words leading-snug">
               {activeProfile.manOfTheSeriesPrize}
@@ -558,7 +569,7 @@ export const DashboardHomeView: React.FC<DashboardHomeViewProps> = ({
 
           <div className="bg-slate-950/55 rounded-xl p-3 sm:p-3.5 border border-purple-400/25">
             <div className="text-[11px] font-extrabold text-purple-200 uppercase tracking-wide">
-              📋 {lang === 'hi' ? 'एंट्री फीस एवं रिकॉर्ड्स' : 'ENTRY FEE & RECORDS'}
+              📋 {t3(lang, 'प्रवेश शुल्क एवं रिकॉर्ड', 'ENTRY FEE & RECORDS', 'एंट्री फीस एवं रिकॉर्ड्स')}
             </div>
             <div className="text-sm sm:text-base font-black text-white mt-0.5 break-words leading-snug">
               ₹ {activeProfile.entryFee} · {players.length} Players · {schedules.length} Matches
@@ -574,22 +585,28 @@ export const DashboardHomeView: React.FC<DashboardHomeViewProps> = ({
             <h2 className="text-base sm:text-xl font-extrabold text-slate-900 dark:text-white flex items-center gap-2">
               <Sparkles className="w-5 h-5 text-amber-500 shrink-0" />
               <span>
-                {lang === 'hi'
-                  ? 'बना-बनाया रेडीमेड डिज़ाइन टेम्पलेट्स (Live Dynamic Templates)'
-                  : 'Ready-Made Dynamic Cricket Templates (Live Preview)'}
+                {t3(
+                  lang,
+                  'बने-बनाए रेडीमेड डिज़ाइन टेम्पलेट्स',
+                  'Ready-Made Dynamic Cricket Templates (Live Preview)',
+                  'बना-बनाया रेडीमेड डिज़ाइन टेम्पलेट्स (Live Dynamic Templates)'
+                )}
               </span>
             </h2>
             <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
-              {lang === 'hi'
-                ? 'हर टेम्पलेट में आपका नाम, लोगो और साइन अपने-आप सेट है। सीधे HD PNG, JPG या PDF डाउनलोड करें या एडिट करें।'
-                : 'Every template is pre-populated with your tournament logo, signature & details. Download in HD or customize.'}
+              {t3(
+                lang,
+                'हर टेम्पलेट में आपका नाम, लोगो और हस्ताक्षर अपने-आप सेट है। सीधे HD PDF या JPG डाउनलोड करें।',
+                'Every template is pre-populated with your tournament logo, signature & details. Download in HD PDF or JPG.',
+                'हर टेम्पलेट में आपका नाम, लोगो और साइन अपने-आप सेट है। सीधे HD PDF या JPG डाउनलोड करें या एडिट करें।'
+              )}
             </p>
           </div>
           <button
             onClick={() => onNavigate('template-library')}
             className="px-3.5 py-2 rounded-xl bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30 text-xs font-extrabold self-start sm:self-auto cursor-pointer"
           >
-            {lang === 'hi'
+            {isHiOrMix
               ? `सभी ${templates.length} टेम्पलेट्स खोलें →`
               : `View All ${templates.length} Templates →`}
           </button>
@@ -607,7 +624,7 @@ export const DashboardHomeView: React.FC<DashboardHomeViewProps> = ({
                   : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800'
               }`}
             >
-              {lang === 'hi' ? tab.labelHi : tab.labelEn}
+              {isHiOrMix ? tab.labelHi : tab.labelEn}
             </button>
           ))}
         </div>
@@ -638,7 +655,7 @@ export const DashboardHomeView: React.FC<DashboardHomeViewProps> = ({
                 <div className="p-3.5 sm:p-4 space-y-3">
                   <div>
                     <h3 className="text-sm font-extrabold text-slate-900 dark:text-white leading-snug">
-                      {lang === 'hi' ? tpl.nameHi || tpl.name : tpl.name}
+                      {isHiOrMix ? tpl.nameHi || tpl.name : tpl.name}
                     </h3>
                     <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-2">
                       {tpl.description}
@@ -652,9 +669,12 @@ export const DashboardHomeView: React.FC<DashboardHomeViewProps> = ({
                   >
                     <Palette className="w-3.5 h-3.5 shrink-0" />
                     <span>
-                      {lang === 'hi'
-                        ? 'डिज़ाइन व टेक्स्ट एडिट करें (Customize)'
-                        : 'Customize in Studio Editor'}
+                      {t3(
+                        lang,
+                        'डिज़ाइन व टेक्स्ट संपादित करें',
+                        'Customize in Studio Editor',
+                        'डिज़ाइन व टेक्स्ट एडिट करें (Customize)'
+                      )}
                     </span>
                   </button>
 
@@ -709,12 +729,15 @@ export const DashboardHomeView: React.FC<DashboardHomeViewProps> = ({
       <section className="space-y-3.5">
         <div>
           <h2 className="text-base sm:text-xl font-extrabold text-slate-900 dark:text-white">
-            {lang === 'hi'
-              ? 'संपूर्ण क्रिकेट टूर्नामेंट डिज़ाइन एवं मैनेजमेंट टूल्स'
-              : 'All Cricket Tournament Design & Management Workspaces'}
+            {t3(
+              lang,
+              'संपूर्ण क्रिकेट टूर्नामेंट डिज़ाइन एवं प्रबंधन टूल्स',
+              'All Cricket Tournament Design & Management Workspaces',
+              'संपूर्ण क्रिकेट टूर्नामेंट डिज़ाइन एवं मैनेजमेंट टूल्स'
+            )}
           </h2>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            {lang === 'hi'
+            {isHiOrMix
               ? 'नीचे किसी भी टूल पर टैप करके अपना कार्ड, पोस्टर, खिलाड़ी सूची या स्कोरकार्ड बनाएं।'
               : 'Tap any workspace below to create and manage tournament documents.'}
           </p>
@@ -736,10 +759,10 @@ export const DashboardHomeView: React.FC<DashboardHomeViewProps> = ({
                 </div>
                 <div className="min-w-0 flex-1">
                   <h3 className="text-sm font-extrabold text-slate-900 dark:text-white break-words">
-                    {lang === 'hi' ? tool.titleHi : tool.titleEn}
+                    {t3(lang, tool.titleHi, tool.titleEn, tool.titleMix)}
                   </h3>
                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 line-clamp-2">
-                    {lang === 'hi' ? tool.descHi : tool.descEn}
+                    {isHiOrMix ? tool.descHi : tool.descEn}
                   </p>
                 </div>
               </button>
@@ -753,12 +776,12 @@ export const DashboardHomeView: React.FC<DashboardHomeViewProps> = ({
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
           <div className="min-w-0">
             <h3 className="text-sm font-extrabold text-slate-900 dark:text-white">
-              {lang === 'hi'
+              {isHiOrMix
                 ? 'आपके मूल जाले क्रिकेट कप (Season-2) रेफरेंस डिज़ाइन'
                 : 'Your Uploaded Jale Cricket Cup Reference Collage'}
             </h3>
             <p className="text-xs text-slate-500 break-words">
-              {lang === 'hi'
+              {isHiOrMix
                 ? 'आमंत्रण कार्ड · 15-खिलाड़ी सूची व शपथ पत्र · मुख्य पोस्टर · प्रधानाचार्य अनुमति पत्र · थाना सूचना पत्र · मैन ऑफ द सीरीज वाउचर'
                 : 'Invitation · 15-Player List & Undertaking · Tournament Poster · Principal Letter · Police SHO Letter · Prize Voucher'}
             </p>
@@ -770,7 +793,7 @@ export const DashboardHomeView: React.FC<DashboardHomeViewProps> = ({
             >
               <FolderHeart className="w-3.5 h-3.5 text-amber-500" />
               <span>
-                {lang === 'hi'
+                {isHiOrMix
                   ? `मेरे सेव डिज़ाइन (${savedDesigns.length})`
                   : `Saved Designs (${savedDesigns.length})`}
               </span>
@@ -779,7 +802,7 @@ export const DashboardHomeView: React.FC<DashboardHomeViewProps> = ({
               onClick={() => onNavigate('backup-restore')}
               className="px-3 py-2 rounded-xl bg-amber-500/15 text-amber-700 dark:text-amber-300 text-xs font-extrabold cursor-pointer"
             >
-              {lang === 'hi' ? 'बैकअप व रीस्टोर' : 'Backup & Restore'}
+              {isHiOrMix ? 'बैकअप व रीस्टोर' : 'Backup & Restore'}
             </button>
           </div>
         </div>

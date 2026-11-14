@@ -35,8 +35,16 @@ import {
   OverSummaryRecord,
   TeamSquadRecord,
   TournamentProfile,
+  t3,
 } from '../types/studio';
 import { exportDesignDocument } from '../utils/exportEngine';
+import {
+  cleanGitHubRepoSlug,
+  generatePublicPrismWidgetUrl,
+  getPermanentGitHubWidgetUrl,
+  pushStateToPublicCloud,
+  subscribeToPublicCloud,
+} from '../utils/prismCloudOverlay';
 
 const SHARED_CLOUD_ORIGIN =
   'https://ais-pre-jyr2zrqjzkpgapapyfwsme-967710688708.asia-southeast1.run.app';
@@ -861,6 +869,7 @@ export const BroadcastOverlayCanvas: React.FC<{
 export const FBLiveBroadcastStudioView: React.FC<
   FBLiveBroadcastStudioViewProps
 > = ({
+  lang,
   activeProfile,
   teams,
   sponsors,
@@ -876,6 +885,20 @@ export const FBLiveBroadcastStudioView: React.FC<
   const [toast, setToast] = useState<string | null>(null);
   const [fullscreenMonitor, setFullscreenMonitor] = useState<boolean>(false);
   const [laptopFullControl, setLaptopFullControl] = useState<boolean>(false);
+  const [prismWidgetUrl, setPrismWidgetUrl] = useState<string>('');
+  const [generatingPrismLink, setGeneratingPrismLink] = useState<boolean>(false);
+  const [githubRepoSlug, setGithubRepoSlug] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem('jale_github_repo_slug');
+      if (saved) return cleanGitHubRepoSlug(saved);
+    } catch {
+      // ignore
+    }
+    const envRepo = (import.meta as unknown as { env?: Record<string, string> })
+      .env?.VITE_GITHUB_REPO;
+    return cleanGitHubRepoSlug(envRepo || '');
+  });
+  const [showNoBallSubMenu, setShowNoBallSubMenu] = useState<boolean>(false);
 
   // Automatic Wicket -> Next Batsman & Fielding Credit prompt
   const [needsNextBatsman, setNeedsNextBatsman] = useState<boolean>(false);
@@ -1005,6 +1028,11 @@ export const FBLiveBroadcastStudioView: React.FC<
         mobile: s.mobile,
         tagline: s.tagline,
       })),
+      extras: 0,
+      wides: 0,
+      noBalls: 0,
+      byes: 0,
+      legByes: 0,
       updatedAt: Date.now(),
     };
   });
@@ -1068,6 +1096,9 @@ export const FBLiveBroadcastStudioView: React.FC<
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ state: stamped }),
       }).catch(() => {});
+
+      // Also push to 100% public cloud sync (works across Android APK, PRISM Live & Laptop anywhere!)
+      pushStateToPublicCloud(roomId, stamped).catch(() => {});
     },
     [roomId, liveState]
   );
@@ -1179,12 +1210,47 @@ export const FBLiveBroadcastStudioView: React.FC<
       // ignore
     }
 
+    // Subscribe to public internet cloud sync (ntfy.sh WebSocket + Poll)
+    const unsubPublic = subscribeToPublicCloud(cleanRoom, (remoteState) => {
+      isApplyingRemoteRef.current = true;
+      setLiveState(remoteState);
+      setSyncConnected(true);
+      setTimeout(() => {
+        isApplyingRemoteRef.current = false;
+      }, 40);
+    });
+
     return () => {
       bcRef.current?.close();
       es?.close();
       ws?.close();
+      unsubPublic();
     };
   }, [roomId]);
+
+  // Automatically generate a 100% Public HTTP-200 PRISM Live Widget URL on startup / room change
+  useEffect(() => {
+    if (overlayOnly) return;
+    const cacheKey = `jale_prism_widget_url_${roomId}`;
+    const cached = localStorage.getItem(cacheKey);
+    if (cached && cached.startsWith('https://htmlpreview.github.io/')) {
+      setPrismWidgetUrl(cached);
+    }
+    setGeneratingPrismLink(true);
+    generatePublicPrismWidgetUrl(roomId, liveState)
+      .then((url) => {
+        setPrismWidgetUrl(url);
+        setSyncConnected(true);
+        try {
+          localStorage.setItem(cacheKey, url);
+        } catch {
+          // ignore
+        }
+      })
+      .catch(() => {})
+      .finally(() => setGeneratingPrismLink(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomId, overlayOnly]);
 
   // Automatic Sponsor Ad Rotation Timer
   useEffect(() => {
@@ -1208,6 +1274,7 @@ export const FBLiveBroadcastStudioView: React.FC<
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ state: updated }),
         }).catch(() => {});
+        pushStateToPublicCloud(roomId, updated).catch(() => {});
         return updated;
       });
     }, intervalMs);
@@ -1237,30 +1304,49 @@ export const FBLiveBroadcastStudioView: React.FC<
   }, [sponsors, overlayOnly]);
 
   // =====================================================================
-  // BALL-BY-BALL SCORING HANDLER (WITH FULL MATCH RECORD & OVER HISTORY)
+  // BALL-BY-BALL SCORING HANDLER (WITH WIDE, NO-BALL, BYE, LEG-BYE & RECORDS)
   // =====================================================================
   const handleBallScore = (
     runsAdded: number,
     options?: {
       isWicket?: boolean;
-      isExtra?: boolean;
-      extraLabel?: string;
+      extraType?: 'WD' | 'NB' | 'B' | 'LB';
+      batRunsOnNoBall?: number;
       celebration?: BroadcastCelebrationType;
     }
   ) => {
     const isWicket = options?.isWicket || false;
-    const isExtra = options?.isExtra || false;
+    const extraType = options?.extraType;
+    const batRunsOnNoBall = options?.batRunsOnNoBall || 0;
 
-    let nextBalls = isExtra ? liveState.balls : liveState.balls + 1;
+    // Wide (WD) and No-Ball (NB) do NOT count as a legal ball in the over.
+    // Bye (B) and Leg-Bye (LB) DO count as a legal ball in the over.
+    const isIllegalDelivery = extraType === 'WD' || extraType === 'NB';
+
+    const totalRunsOnDelivery =
+      extraType === 'NB' ? 1 + batRunsOnNoBall : runsAdded;
+
+    let nextBalls = isIllegalDelivery ? liveState.balls : liveState.balls + 1;
     let nextOvers = liveState.overs;
+
     const ballBadge = isWicket
       ? 'W'
-      : isExtra
-      ? options?.extraLabel || 'WD'
+      : extraType === 'WD'
+      ? runsAdded > 1
+        ? `WD+${runsAdded - 1}`
+        : 'WD'
+      : extraType === 'NB'
+      ? batRunsOnNoBall > 0
+        ? `NB+${batRunsOnNoBall}`
+        : 'NB'
+      : extraType === 'B'
+      ? `B${runsAdded}`
+      : extraType === 'LB'
+      ? `LB${runsAdded}`
       : String(runsAdded);
 
     const fullOverBalls = [...liveState.thisOverBalls, ballBadge];
-    let nextThisOver = fullOverBalls.slice(-6);
+    let nextThisOver = fullOverBalls.slice(-8);
     let overCompleted = false;
     const nextOverHistory: OverSummaryRecord[] = [
       ...(liveState.overHistory || []),
@@ -1275,6 +1361,14 @@ export const FBLiveBroadcastStudioView: React.FC<
       const overRuns = fullOverBalls.reduce((sum, b) => {
         if (b === 'W') return sum;
         if (b === 'WD' || b === 'NB') return sum + 1;
+        if (b.startsWith('WD+') || b.startsWith('NB+')) {
+          const extraNum = parseInt(b.split('+')[1] || '0', 10);
+          return sum + 1 + (isNaN(extraNum) ? 0 : extraNum);
+        }
+        if (b.startsWith('B') || b.startsWith('LB')) {
+          const num = parseInt(b.replace(/^LB|^B/, ''), 10);
+          return sum + (isNaN(num) ? 1 : num);
+        }
         const parsed = parseInt(b, 10);
         return sum + (isNaN(parsed) ? 0 : parsed);
       }, 0);
@@ -1291,7 +1385,11 @@ export const FBLiveBroadcastStudioView: React.FC<
       nextThisOver = [];
     }
 
-    // Update Batsman Record
+    // Update Batsman Record:
+    // - Normal legal ball: +runsAdded to batsman, +1 ball faced
+    // - No-Ball (NB): +batRunsOnNoBall to batsman, +1 ball faced
+    // - Wide (WD): +0 runs to batsman, +0 balls faced
+    // - Bye (B) / Leg-Bye (LB): +0 runs to batsman, +1 ball faced
     const currentBatsmanRecords: Record<string, BatsmanLiveStat> = {
       ...(liveState.batsmanRecords || {}),
     };
@@ -1306,20 +1404,19 @@ export const FBLiveBroadcastStudioView: React.FC<
       dismissalText: 'Not Out',
     };
 
-    const nextStrikerRuns = isExtra
-      ? prevStrikerRec.runs
-      : prevStrikerRec.runs + runsAdded;
-    const nextStrikerBalls = isExtra
-      ? prevStrikerRec.balls
-      : prevStrikerRec.balls + 1;
+    const batsmanRunsEarned = !extraType
+      ? runsAdded
+      : extraType === 'NB'
+      ? batRunsOnNoBall
+      : 0;
+    const batsmanBallCounted = extraType === 'WD' ? 0 : 1;
+
+    const nextStrikerRuns = prevStrikerRec.runs + batsmanRunsEarned;
+    const nextStrikerBalls = prevStrikerRec.balls + batsmanBallCounted;
     const nextStrikerFours =
-      !isExtra && runsAdded === 4
-        ? prevStrikerRec.fours + 1
-        : prevStrikerRec.fours;
+      batsmanRunsEarned === 4 ? prevStrikerRec.fours + 1 : prevStrikerRec.fours;
     const nextStrikerSixes =
-      !isExtra && runsAdded === 6
-        ? prevStrikerRec.sixes + 1
-        : prevStrikerRec.sixes;
+      batsmanRunsEarned === 6 ? prevStrikerRec.sixes + 1 : prevStrikerRec.sixes;
 
     currentBatsmanRecords[liveState.strikerName] = {
       ...prevStrikerRec,
@@ -1333,7 +1430,6 @@ export const FBLiveBroadcastStudioView: React.FC<
         : prevStrikerRec.dismissalText,
     };
 
-    // Ensure non-striker also exists in batsmanRecords
     if (!currentBatsmanRecords[liveState.nonStrikerName]) {
       currentBatsmanRecords[liveState.nonStrikerName] = {
         name: liveState.nonStrikerName,
@@ -1347,7 +1443,9 @@ export const FBLiveBroadcastStudioView: React.FC<
       };
     }
 
-    // Update Bowler Record
+    // Update Bowler Record:
+    // - Byes (B) & Leg-Byes (LB) count as legal balls bowled, but runs do NOT go against bowler's runsConceded
+    // - Wides (WD) & No-Balls (NB) do NOT count as legal balls bowled, and runs DO go against bowler's runsConceded
     const currentBowlerRecords: Record<string, BowlerLiveStat> = {
       ...(liveState.bowlerRecords || {}),
     };
@@ -1362,15 +1460,22 @@ export const FBLiveBroadcastStudioView: React.FC<
       sixesConceded: 0,
     };
 
-    const nextBowlerBalls = isExtra
+    const nextBowlerBalls = isIllegalDelivery
       ? prevBowlerRec.ballsBowled
       : prevBowlerRec.ballsBowled + 1;
-    const nextBowlerRuns = Math.max(0, prevBowlerRec.runsConceded + runsAdded);
+    const bowlerRunsCharged =
+      extraType === 'B' || extraType === 'LB' ? 0 : totalRunsOnDelivery;
+    const nextBowlerRuns = Math.max(
+      0,
+      prevBowlerRec.runsConceded + bowlerRunsCharged
+    );
     const nextBowlerWickets = isWicket
       ? prevBowlerRec.wickets + 1
       : prevBowlerRec.wickets;
     const nextBowlerDots =
-      !isExtra && runsAdded === 0 ? prevBowlerRec.dots + 1 : prevBowlerRec.dots;
+      !isIllegalDelivery && totalRunsOnDelivery === 0
+        ? prevBowlerRec.dots + 1
+        : prevBowlerRec.dots;
 
     currentBowlerRecords[liveState.bowlerName] = {
       ...prevBowlerRec,
@@ -1379,26 +1484,33 @@ export const FBLiveBroadcastStudioView: React.FC<
       wickets: nextBowlerWickets,
       dots: nextBowlerDots,
       foursConceded:
-        !isExtra && runsAdded === 4
+        batsmanRunsEarned === 4
           ? prevBowlerRec.foursConceded + 1
           : prevBowlerRec.foursConceded,
       sixesConceded:
-        !isExtra && runsAdded === 6
+        batsmanRunsEarned === 6
           ? prevBowlerRec.sixesConceded + 1
           : prevBowlerRec.sixesConceded,
     };
 
-    // Swap strike on odd runs (1, 3), or at end of over (flipped if odd runs on last ball)
-    const oddRunSwap = !isExtra && (runsAdded === 1 || runsAdded === 3);
+    // Swap strike on odd physical runs (1, 3) on legal balls, Byes, Leg-Byes, or No-Ball bat runs
+    const physicalRunsCrossed =
+      extraType === 'WD'
+        ? Math.max(0, runsAdded - 1)
+        : extraType === 'NB'
+        ? batRunsOnNoBall
+        : runsAdded;
+    const oddRunSwap =
+      physicalRunsCrossed === 1 || physicalRunsCrossed === 3;
     const shouldSwapStrike = overCompleted ? !oddRunSwap : oddRunSwap;
 
     const celebrationType: BroadcastCelebrationType =
       options?.celebration ||
       (isWicket
         ? 'WICKET'
-        : runsAdded === 6
+        : batsmanRunsEarned === 6
         ? 'SIX'
-        : runsAdded === 4
+        : batsmanRunsEarned === 4
         ? 'FOUR'
         : 'none');
 
@@ -1422,14 +1534,34 @@ export const FBLiveBroadcastStudioView: React.FC<
       setCustomNextBowler('');
     }
 
+    const extraRunsAdded =
+      extraType === 'WD'
+        ? runsAdded
+        : extraType === 'NB'
+        ? 1
+        : extraType === 'B' || extraType === 'LB'
+        ? runsAdded
+        : 0;
+
+    setShowNoBallSubMenu(false);
+
     const nextState: LiveBroadcastRoomState = {
       ...liveState,
-      runs: Math.max(0, liveState.runs + runsAdded),
+      runs: Math.max(0, liveState.runs + totalRunsOnDelivery),
       wickets: isWicket
         ? Math.min(10, liveState.wickets + 1)
         : liveState.wickets,
       overs: nextOvers,
       balls: nextBalls,
+      extras: (liveState.extras || 0) + extraRunsAdded,
+      wides:
+        (liveState.wides || 0) + (extraType === 'WD' ? runsAdded : 0),
+      noBalls:
+        (liveState.noBalls || 0) + (extraType === 'NB' ? 1 : 0),
+      byes:
+        (liveState.byes || 0) + (extraType === 'B' ? runsAdded : 0),
+      legByes:
+        (liveState.legByes || 0) + (extraType === 'LB' ? runsAdded : 0),
       strikerName: shouldSwapStrike
         ? liveState.nonStrikerName
         : liveState.strikerName,
@@ -1846,9 +1978,30 @@ export const FBLiveBroadcastStudioView: React.FC<
   ]);
 
   const overlayUrl = useMemo(() => {
+    if (prismWidgetUrl) return prismWidgetUrl;
     const base = getPublicShareOrigin();
     return `${base}/?liveOverlay=1&room=${encodeURIComponent(roomId)}`;
-  }, [roomId]);
+  }, [prismWidgetUrl, roomId]);
+
+  const handleCopyPrismLink = async () => {
+    try {
+      setGeneratingPrismLink(true);
+      const freshUrl =
+        prismWidgetUrl ||
+        (await generatePublicPrismWidgetUrl(roomId, liveState));
+      setPrismWidgetUrl(freshUrl);
+      await pushStateToPublicCloud(roomId, liveState);
+      await navigator.clipboard?.writeText(freshUrl);
+      triggerToast(
+        '✓ 100% Working पब्लिक PRISM Live लिंक कॉपी हो गया! अब PRISM Live -> Web में पेस्ट करें।'
+      );
+    } catch {
+      navigator.clipboard?.writeText(overlayUrl);
+      triggerToast('✓ PRISM Live लिंक कॉपी हो गया!');
+    } finally {
+      setGeneratingPrismLink(false);
+    }
+  };
 
   if (overlayOnly) {
     return <BroadcastOverlayCanvas state={liveState} transparentBg={true} />;
@@ -1891,87 +2044,228 @@ export const FBLiveBroadcastStudioView: React.FC<
       )}
 
       {/* =====================================================================
-          TOP BAR: ROOM CODE + PRISM LIVE LINK + LAPTOP FULL-SCREEN CONTROL MODE
+          TOP BAR: ROOM CODE + 100% PUBLIC PRISM LIVE LINK + LAPTOP FULL-SCREEN
       ===================================================================== */}
-      <div className="rounded-2xl bg-[#0B192C] text-white p-3.5 sm:p-4 border-2 border-amber-500/60 shadow-lg flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-        <div className="space-y-0.5">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-red-600 text-white text-[10px] font-black uppercase">
-              <Radio className="w-3 h-3 animate-pulse" />
-              Mobile + Laptop Live Studio
-            </span>
-            <span className="text-xs font-bold text-emerald-400">
-              {syncConnected ? '● दोनों डिवाइस कनेक्टेड हैं' : '● लाइव सिंक चालू है'}
-            </span>
+      <div className="rounded-2xl bg-[#0B192C] text-white p-3.5 sm:p-4 border-2 border-amber-500/60 shadow-lg space-y-3">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          <div className="space-y-0.5">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-red-600 text-white text-[10px] font-black uppercase">
+                <Radio className="w-3 h-3 animate-pulse" />
+                Mobile + Laptop Live Studio
+              </span>
+              <span className="text-xs font-bold text-emerald-400">
+                {syncConnected
+                  ? '● पब्लिक क्लाउड सिंक चालू है (PRISM Live Ready)'
+                  : '● लाइव सिंक कनेक्ट हो रहा है...'}
+              </span>
+            </div>
+            <h1 className="text-sm sm:text-xl font-black text-amber-400">
+              🔴 फेसबुक लाइव रिमोट स्कोरर, ऑटो-अवार्ड्स & विज्ञापन कंट्रोल रूम
+            </h1>
           </div>
-          <h1 className="text-sm sm:text-xl font-black text-amber-400">
-            🔴 फेसबुक लाइव रिमोट स्कोरर, ऑटो-अवार्ड्स & विज्ञापन कंट्रोल रूम
-          </h1>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-1.5 bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-700">
+              <span className="text-[11px] font-bold text-slate-400">कोड:</span>
+              <input
+                type="text"
+                value={roomId}
+                onChange={(e) => setRoomId(e.target.value.toUpperCase())}
+                className="w-24 bg-transparent text-amber-300 font-mono font-black text-xs uppercase focus:outline-none"
+              />
+            </div>
+
+            <button
+              type="button"
+              onClick={handleCopyPrismLink}
+              disabled={generatingPrismLink}
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs cursor-pointer shadow-sm"
+            >
+              <Copy className="w-3.5 h-3.5" />
+              <span>
+                {generatingPrismLink
+                  ? 'लिंक बन रहा है...'
+                  : 'कैमरा फोन (PRISM Live) पब्लिक लिंक कॉपी करें'}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setFullscreenMonitor(true)}
+              className="flex items-center gap-1 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs cursor-pointer border border-slate-700"
+            >
+              <Eye className="w-3.5 h-3.5" />
+              <span>टीवी प्रिव्यू फुल स्क्रीन</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                const nextMode = !laptopFullControl;
+                setLaptopFullControl(nextMode);
+                if (nextMode && !document.fullscreenElement) {
+                  document.documentElement
+                    .requestFullscreen?.()
+                    .catch(() => {});
+                } else if (!nextMode && document.fullscreenElement) {
+                  document.exitFullscreen?.().catch(() => {});
+                }
+              }}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-xl font-black text-xs cursor-pointer border transition-colors ${
+                laptopFullControl
+                  ? 'bg-red-600 text-white border-red-400'
+                  : 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-400'
+              }`}
+            >
+              {laptopFullControl ? (
+                <>
+                  <Minimize2 className="w-3.5 h-3.5" />
+                  <span>लैपटॉप फुल-स्क्रीन बंद करें</span>
+                </>
+              ) : (
+                <>
+                  <Maximize2 className="w-3.5 h-3.5" />
+                  <span>🖥️ लैपटॉप / बड़ी स्क्रीन फुल कंट्रोल</span>
+                </>
+              )}
+            </button>
+          </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex items-center gap-1.5 bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-700">
-            <span className="text-[11px] font-bold text-slate-400">कोड:</span>
-            <input
-              type="text"
-              value={roomId}
-              onChange={(e) => setRoomId(e.target.value.toUpperCase())}
-              className="w-24 bg-transparent text-amber-300 font-mono font-black text-xs uppercase focus:outline-none"
-            />
+        {/* PUBLIC PRISM LIVE LINK BOX + LIFETIME PERMANENT GITHUB LINK */}
+        <div className="bg-slate-900/95 rounded-xl p-3 border border-emerald-500/40 space-y-2.5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="text-[11px] font-black text-emerald-400">
+              {t3(
+                lang,
+                '✅ PRISM Live वेब लिंक (इंस्टेंट क्लाउड + ♾️ लाइफटाइम परमानेंट GitHub लिंक):',
+                '✅ PRISM Live Web Link (Instant Cloud + ♾️ Lifetime Permanent GitHub Link):',
+                '✅ PRISM Live Web लिंक (Instant Cloud + ♾️ Lifetime Permanent GitHub लिंक):'
+              )}
+            </span>
+            <button
+              type="button"
+              onClick={async () => {
+                setGeneratingPrismLink(true);
+                try {
+                  const fresh = await generatePublicPrismWidgetUrl(
+                    roomId,
+                    liveState,
+                    githubRepoSlug
+                  );
+                  setPrismWidgetUrl(fresh);
+                  localStorage.setItem(`jale_prism_widget_url_${roomId}`, fresh);
+                  await navigator.clipboard?.writeText(fresh);
+                  triggerToast('✓ नया पब्लिक PRISM लिंक जनरेट और कॉपी हो गया!');
+                } catch {
+                  // ignore
+                } finally {
+                  setGeneratingPrismLink(false);
+                }
+              }}
+              className="text-[10px] font-black text-amber-300 underline cursor-pointer"
+            >
+              {t3(lang, '🔄 लिंक रिफ्रेश करें', '🔄 Refresh Link', '🔄 लिंक Refresh करें')}
+            </button>
           </div>
 
-          <button
-            type="button"
-            onClick={() => {
-              navigator.clipboard?.writeText(overlayUrl);
-              triggerToast(
-                '✓ Live Overlay लिंक कॉपी हो गया! कैमरा फोन के PRISM Live में पेस्ट करें।'
-              );
-            }}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs cursor-pointer shadow-sm"
-          >
-            <Copy className="w-3.5 h-3.5" />
-            <span>कैमरा फोन (PRISM Live) लिंक कॉपी करें</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              readOnly
+              value={overlayUrl}
+              onClick={(e) => (e.target as HTMLInputElement).select()}
+              className="flex-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-amber-300 font-mono text-xs"
+            />
+            <button
+              type="button"
+              onClick={handleCopyPrismLink}
+              className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs cursor-pointer shrink-0"
+            >
+              {t3(lang, '📋 लिंक कॉपी करें', '📋 Copy Link', '📋 Copy लिंक')}
+            </button>
+          </div>
 
-          <button
-            type="button"
-            onClick={() => setFullscreenMonitor(true)}
-            className="flex items-center gap-1 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs cursor-pointer border border-slate-700"
-          >
-            <Eye className="w-3.5 h-3.5" />
-            <span>टीवी प्रिव्यू फुल स्क्रीन</span>
-          </button>
+          {/* LIFETIME PERMANENT GITHUB REPO CONNECTION BAR */}
+          <div className="bg-slate-950/90 rounded-lg p-2.5 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="space-y-0.5">
+              <div className="text-[11px] font-black text-amber-300">
+                {t3(
+                  lang,
+                  '♾️ लाइफटाइम नॉन-एक्सपायरिंग GitHub लिंक (कभी एक्सपायर नहीं होगा):',
+                  '♾️ Lifetime Non-Expiring GitHub Link (Never Expires):',
+                  '♾️ Lifetime परमानेंट GitHub लिंक (कभी Expire नहीं होगा):'
+                )}
+              </div>
+              <div className="text-[10px] font-bold text-slate-400">
+                {githubRepoSlug
+                  ? `Connected Repo: ${githubRepoSlug} (public/live-overlay.html)`
+                  : t3(
+                      lang,
+                      'अपना GitHub यूजरनेम/रिपॉजिटरी लिखें (जैसे: username/jale-cricket) — या GitHub APK बिल्ड में यह अपने-आप जुड़ जाएगा:',
+                      'Enter your GitHub username/repo (e.g. username/jale-cricket) — auto-detected in GitHub APK build:',
+                      'अपना GitHub username/repo डालें (जैसे: username/jale-cricket) — GitHub APK में ऑटोमैटिक जुड़ जाता है:'
+                    )}
+              </div>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <input
+                type="text"
+                value={githubRepoSlug}
+                onChange={(e) => setGithubRepoSlug(e.target.value)}
+                placeholder="username/repo-name"
+                className="w-44 sm:w-52 px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-700 text-white font-mono text-xs"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  const cleanSlug = cleanGitHubRepoSlug(githubRepoSlug);
+                  setGithubRepoSlug(cleanSlug);
+                  try {
+                    localStorage.setItem('jale_github_repo_slug', cleanSlug);
+                  } catch {
+                    // ignore
+                  }
+                  if (cleanSlug) {
+                    const permUrl = getPermanentGitHubWidgetUrl(
+                      roomId,
+                      cleanSlug
+                    );
+                    if (permUrl) {
+                      setPrismWidgetUrl(permUrl);
+                      navigator.clipboard?.writeText(permUrl);
+                      triggerToast(
+                        '♾️ लाइफटाइम परमानेंट GitHub लिंक सेट और कॉपी हो गया!'
+                      );
+                    }
+                  } else {
+                    triggerToast('कृपया सही username/repo लिखें');
+                  }
+                }}
+                className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-[11px] cursor-pointer whitespace-nowrap"
+              >
+                {t3(lang, '♾️ परमानेंट लिंक बनाएं', '♾️ Set Permanent', '♾️ Permanent सेट करें')}
+              </button>
+            </div>
+          </div>
 
-          <button
-            type="button"
-            onClick={() => {
-              const nextMode = !laptopFullControl;
-              setLaptopFullControl(nextMode);
-              if (nextMode && !document.fullscreenElement) {
-                document.documentElement.requestFullscreen?.().catch(() => {});
-              } else if (!nextMode && document.fullscreenElement) {
-                document.exitFullscreen?.().catch(() => {});
-              }
-            }}
-            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl font-black text-xs cursor-pointer border transition-colors ${
-              laptopFullControl
-                ? 'bg-red-600 text-white border-red-400'
-                : 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-400'
-            }`}
-          >
-            {laptopFullControl ? (
-              <>
-                <Minimize2 className="w-3.5 h-3.5" />
-                <span>लैपटॉप फुल-स्क्रीन बंद करें</span>
-              </>
-            ) : (
-              <>
-                <Maximize2 className="w-3.5 h-3.5" />
-                <span>🖥️ लैपटॉप / बड़ी स्क्रीन फुल कंट्रोल</span>
-              </>
-            )}
-          </button>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px] font-bold text-slate-200 pt-0.5">
+            <div className="bg-slate-800/80 px-2.5 py-1.5 rounded-lg border border-white/10">
+              <span className="text-amber-400 font-black">स्टेप 1:</span> PRISM
+              Live में <b>Widget ➔ 🌐 Web</b> चुनें और ऊपर वाला लिंक पेस्ट करें।
+            </div>
+            <div className="bg-slate-800/80 px-2.5 py-1.5 rounded-lg border border-white/10">
+              <span className="text-amber-400 font-black">स्टेप 2:</span> स्क्रीन
+              पर जो बॉक्स आएगा, उसके <b>नीचे-दाएं कोने वाले [ ⛶ ] बटन</b> को दबाकर{' '}
+              <b>Full Screen</b> कर लें।
+            </div>
+            <div className="bg-slate-800/80 px-2.5 py-1.5 rounded-lg border border-white/10">
+              <span className="text-amber-400 font-black">स्टेप 3:</span> बॉक्स
+              के <b>ऊपर-बाएं कोने में ताले 🔒 (Lock)</b> पर टैप करें — अब दूसरे
+              फोन से स्कोर दबाएं, तुरंत बदलेगा!
+            </div>
+          </div>
         </div>
       </div>
 
@@ -2375,35 +2669,35 @@ export const FBLiveBroadcastStudioView: React.FC<
               </div>
             )}
 
-            {/* 8 BIG 1-TAP BALL SCORING BUTTONS */}
+            {/* MAIN 1-TAP BALL SCORING BUTTONS (CLEAN & SIMPLE) */}
             <div className="grid grid-cols-4 gap-2 sm:gap-2.5">
               <button
                 type="button"
                 onClick={() => handleBallScore(0)}
                 className="py-3.5 rounded-2xl bg-slate-800 hover:bg-slate-700 font-black text-sm border border-white/15 cursor-pointer active:scale-95"
               >
-                0 (डॉट गेंद)
+                {t3(lang, '0 (डॉट गेंद)', '0 (Dot Ball)', '0 (डॉट Ball)')}
               </button>
               <button
                 type="button"
                 onClick={() => handleBallScore(1)}
                 className="py-3.5 rounded-2xl bg-blue-700 hover:bg-blue-600 font-black text-sm cursor-pointer active:scale-95"
               >
-                +1 रन
+                {t3(lang, '+1 रन', '+1 Run', '+1 रन')}
               </button>
               <button
                 type="button"
                 onClick={() => handleBallScore(2)}
                 className="py-3.5 rounded-2xl bg-blue-700 hover:bg-blue-600 font-black text-sm cursor-pointer active:scale-95"
               >
-                +2 रन
+                {t3(lang, '+2 रन', '+2 Runs', '+2 रन')}
               </button>
               <button
                 type="button"
                 onClick={() => handleBallScore(3)}
                 className="py-3.5 rounded-2xl bg-blue-700 hover:bg-blue-600 font-black text-sm cursor-pointer active:scale-95"
               >
-                +3 रन
+                {t3(lang, '+3 रन', '+3 Runs', '+3 रन')}
               </button>
 
               <button
@@ -2411,33 +2705,165 @@ export const FBLiveBroadcastStudioView: React.FC<
                 onClick={() => handleBallScore(4, { celebration: 'FOUR' })}
                 className="py-4 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-sm cursor-pointer shadow-md active:scale-95"
               >
-                🔥 +4 चौका
+                {t3(lang, '🔥 +4 चौका', '🔥 +4 FOUR', '🔥 +4 चौका')}
               </button>
               <button
                 type="button"
                 onClick={() => handleBallScore(6, { celebration: 'SIX' })}
                 className="py-4 rounded-2xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-sm cursor-pointer shadow-md active:scale-95"
               >
-                🚀 +6 छक्का
+                {t3(lang, '🚀 +6 छक्का', '🚀 +6 SIX', '🚀 +6 छक्का')}
               </button>
               <button
                 type="button"
                 onClick={() =>
                   handleBallScore(0, { isWicket: true, celebration: 'WICKET' })
                 }
-                className="py-4 rounded-2xl bg-red-600 hover:bg-red-500 text-white font-black text-sm cursor-pointer shadow-md active:scale-95"
+                className="py-4 rounded-2xl bg-red-600 hover:bg-red-500 text-white font-black text-sm cursor-pointer shadow-md active:scale-95 col-span-2"
               >
-                🎯 OUT विकेट
+                {t3(
+                  lang,
+                  '🎯 आउट / विकेट (WICKET)',
+                  '🎯 OUT / WICKET',
+                  '🎯 OUT विकेट'
+                )}
               </button>
-              <button
-                type="button"
-                onClick={() =>
-                  handleBallScore(1, { isExtra: true, extraLabel: 'WD' })
-                }
-                className="py-4 rounded-2xl bg-purple-700 hover:bg-purple-600 text-white font-black text-sm cursor-pointer active:scale-95"
-              >
-                +1 वाइड / NB
-              </button>
+            </div>
+
+            {/* DEDICATED EXTRAS ROW: WIDE (WD), NO BALL (NB), BYE (B), LEG BYE (LB) */}
+            <div className="bg-slate-900/90 rounded-2xl p-2.5 border border-purple-500/30 space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] font-black text-purple-300">
+                <span>
+                  {t3(
+                    lang,
+                    '➕ अतिरिक्त रन बटन (वाइड, नो-बॉल, बाई, लेग-बाई):',
+                    '➕ Extras (Wide, No-Ball, Bye, Leg-Bye):',
+                    '➕ Extras (Wide, No-Ball, Bye, Leg-Bye):'
+                  )}
+                </span>
+                <span className="font-mono text-amber-300">
+                  {t3(lang, 'कुल अतिरिक्त', 'Total Extras', 'Extras')}:{' '}
+                  {liveState.extras || 0} (WD:{liveState.wides || 0}, NB:
+                  {liveState.noBalls || 0}, B:{liveState.byes || 0}, LB:
+                  {liveState.legByes || 0})
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {/* 1. WIDE BALL */}
+                <button
+                  type="button"
+                  onClick={() => handleBallScore(1, { extraType: 'WD' })}
+                  className="py-2.5 px-2 rounded-xl bg-purple-700 hover:bg-purple-600 text-white font-black text-xs cursor-pointer active:scale-95"
+                >
+                  {t3(lang, '+1 वाइड (WD)', '+1 Wide (WD)', '+1 वाइड (WD)')}
+                </button>
+
+                {/* 2. NO BALL (1-Tap +1 NB or expand for NB + Bat runs) */}
+                <div className="flex items-stretch gap-1">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleBallScore(1, {
+                        extraType: 'NB',
+                        batRunsOnNoBall: 0,
+                      })
+                    }
+                    className="flex-1 py-2.5 px-2 rounded-xl bg-fuchsia-700 hover:bg-fuchsia-600 text-white font-black text-xs cursor-pointer active:scale-95"
+                  >
+                    {t3(lang, '+1 नो-बॉल (NB)', '+1 No-Ball (NB)', '+1 नो-बॉल (NB)')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowNoBallSubMenu((v) => !v)}
+                    title="No-Ball + Bat Runs (NB+1, NB+4, NB+6)"
+                    className="px-2 rounded-xl bg-fuchsia-900 hover:bg-fuchsia-800 text-amber-300 font-black text-[11px] border border-fuchsia-400/40 cursor-pointer"
+                  >
+                    +रन
+                  </button>
+                </div>
+
+                {/* 3. BYE (B) */}
+                <div className="grid grid-cols-3 gap-1 bg-slate-800 p-1 rounded-xl border border-white/10">
+                  <button
+                    type="button"
+                    onClick={() => handleBallScore(1, { extraType: 'B' })}
+                    className="py-1.5 rounded-lg bg-teal-700 hover:bg-teal-600 text-white font-black text-[11px] cursor-pointer"
+                  >
+                    {t3(lang, '+1 बाई', '+1 Bye', '+1 बाई (B)')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleBallScore(2, { extraType: 'B' })}
+                    className="py-1.5 rounded-lg bg-teal-800 hover:bg-teal-700 text-white font-black text-[11px] cursor-pointer"
+                  >
+                    +2B
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleBallScore(4, { extraType: 'B' })}
+                    className="py-1.5 rounded-lg bg-teal-800 hover:bg-teal-700 text-white font-black text-[11px] cursor-pointer"
+                  >
+                    +4B
+                  </button>
+                </div>
+
+                {/* 4. LEG BYE (LB) */}
+                <div className="grid grid-cols-3 gap-1 bg-slate-800 p-1 rounded-xl border border-white/10">
+                  <button
+                    type="button"
+                    onClick={() => handleBallScore(1, { extraType: 'LB' })}
+                    className="py-1.5 rounded-lg bg-indigo-700 hover:bg-indigo-600 text-white font-black text-[11px] cursor-pointer"
+                  >
+                    {t3(lang, '+1 लेग-बाई', '+1 LegBye', '+1 लेग-बाई (LB)')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleBallScore(2, { extraType: 'LB' })}
+                    className="py-1.5 rounded-lg bg-indigo-800 hover:bg-indigo-700 text-white font-black text-[11px] cursor-pointer"
+                  >
+                    +2LB
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleBallScore(4, { extraType: 'LB' })}
+                    className="py-1.5 rounded-lg bg-indigo-800 hover:bg-indigo-700 text-white font-black text-[11px] cursor-pointer"
+                  >
+                    +4LB
+                  </button>
+                </div>
+              </div>
+
+              {/* Optional sub-bar when batsman hits runs on a No-Ball */}
+              {showNoBallSubMenu && (
+                <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-white/10">
+                  <span className="text-[10px] font-black text-amber-300">
+                    {t3(
+                      lang,
+                      'नो-बॉल पर बल्ले से रन:',
+                      'No-Ball + Bat Runs:',
+                      'No-Ball पर बल्ले से रन:'
+                    )}
+                  </span>
+                  {[1, 2, 3, 4, 6].map((batR) => (
+                    <button
+                      key={batR}
+                      type="button"
+                      onClick={() =>
+                        handleBallScore(1 + batR, {
+                          extraType: 'NB',
+                          batRunsOnNoBall: batR,
+                          celebration:
+                            batR === 6 ? 'SIX' : batR === 4 ? 'FOUR' : 'none',
+                        })
+                      }
+                      className="px-2.5 py-1 rounded-lg bg-fuchsia-600 hover:bg-fuchsia-500 text-white font-black text-xs cursor-pointer"
+                    >
+                      NB + {batR} ({1 + batR} रन)
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* INSTANT MISTAKE CORRECTION BAR (+/- RUNS, WICKETS, BALLS, OVERS) — NO SQUISHING! */}

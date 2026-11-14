@@ -1,9 +1,14 @@
-name: Build Jale Cricket Studio Android APK
+name: Build Jale Cricket Studio Android APK & Permanent Live Overlay
 
 on:
   push:
     branches: [ main, master ]
   workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
 
 jobs:
   build-apk:
@@ -24,7 +29,10 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
-      - name: 4. Install Dependencies & Build Web App
+      - name: 4. Install Dependencies & Build Web App (with Permanent GitHub Link)
+        env:
+          VITE_GITHUB_REPO: ${{ github.repository }}
+          VITE_GITHUB_BRANCH: ${{ github.ref_name }}
         run: |
           npm install --legacy-peer-deps
           npm run build

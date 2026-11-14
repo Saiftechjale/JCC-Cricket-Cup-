@@ -58,6 +58,7 @@ import {
 import {
   DesignDocument,
   FullStudioBackup,
+  Language,
   LocalSponsorAd,
   MatchResultRecord,
   MatchScheduleRecord,
@@ -69,6 +70,7 @@ import {
   TemplateCategory,
   TournamentProfile,
   WorkspaceSection,
+  t3,
 } from './types/studio';
 import {
   DEFAULT_SETTINGS,
@@ -82,30 +84,31 @@ interface NavItem {
   id: WorkspaceSection;
   labelHi: string;
   labelEn: string;
+  labelMix: string;
   icon: React.ElementType;
   category?: TemplateCategory;
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { id: 'dashboard', labelHi: '1. डैशबोर्ड (Dashboard)', labelEn: '1. Dashboard', icon: Home },
-  { id: 'fb-live-studio', labelHi: '🔴 FB Live & 2-मोबाइल स्टूडियो', labelEn: '🔴 FB Live 2-Mobile Studio', icon: Radio },
-  { id: 'tournament-profile', labelHi: '2. टूर्नामेंट प्रोफाइल', labelEn: '2. Tournament Profile', icon: Shield },
-  { id: 'poster-maker', labelHi: '3. पोस्टर और बैनर मेकर', labelEn: '3. Poster & Banner Maker', icon: Palette, category: 'poster' },
-  { id: 'invitation-maker', labelHi: '4. आमंत्रण कार्ड मेकर', labelEn: '4. Invitation Card Maker', icon: Mail, category: 'invitation' },
-  { id: 'player-list-maker', labelHi: '5. 8-टीम & 15-खिलाड़ी मेकर', labelEn: '5. 8-Team & 15-Player Maker', icon: Users, category: 'player-list' },
-  { id: 'rules-maker', labelHi: '6. नियम व शर्तें मेकर', labelEn: '6. Rules & Regulations', icon: ScrollText, category: 'rules' },
-  { id: 'prize-maker', labelHi: '7. पुरस्कार वितरण मेकर', labelEn: '7. Prize Distribution', icon: Trophy, category: 'prize' },
-  { id: 'certificate-maker', labelHi: '8. सर्टिफिकेट मेकर', labelEn: '8. Certificate Maker', icon: Award, category: 'certificate' },
-  { id: 'voucher-maker', labelHi: '9. प्राइज वाउचर मेकर', labelEn: '9. Prize Voucher Maker', icon: CreditCard, category: 'voucher' },
-  { id: 'schedule-maker', labelHi: '10. 8-टीम शेड्यूल & FB Live', labelEn: '10. 8-Team Schedule & Live', icon: Calendar, category: 'schedule' },
-  { id: 'result-maker', labelHi: '11. मैच रिजल्ट & अखबार खबर', labelEn: '11. Results & Newspaper', icon: FileCheck, category: 'result' },
-  { id: 'scorecard-maker', labelHi: '12. स्कोरकार्ड & माइक प्रचार', labelEn: '12. Scorecard & Mic Prachar', icon: ClipboardList, category: 'scorecard' },
-  { id: 'letter-maker', labelHi: '13. आधिकारिक पत्र मेकर', labelEn: '13. Official Letter Maker', icon: FileText, category: 'letter' },
-  { id: 'template-library', labelHi: '14. टेम्पलेट लाइब्रेरी', labelEn: '14. Template Library', icon: LayoutTemplate },
-  { id: 'saved-designs', labelHi: '15. मेरे सेव डिज़ाइन', labelEn: '15. My Saved Designs', icon: FolderHeart },
-  { id: 'media-library', labelHi: '16. मीडिया व लोगो लाइब्रेरी', labelEn: '16. Media & Logo Library', icon: ImageIcon },
-  { id: 'backup-restore', labelHi: '17. बैकअप और रीस्टोर', labelEn: '17. Backup & Restore', icon: Database },
-  { id: 'settings', labelHi: '18. सेटिंग्स (Settings)', labelEn: '18. Settings', icon: Settings },
+  { id: 'dashboard', labelHi: '1. मुख्य पटल (डैशबोर्ड)', labelEn: '1. Dashboard', labelMix: '1. डैशबोर्ड (Dashboard)', icon: Home },
+  { id: 'fb-live-studio', labelHi: '🔴 फेसबुक लाइव स्कोरिंग स्टूडियो', labelEn: '🔴 FB Live Scoring Studio', labelMix: '🔴 FB Live & 2-मोबाइल स्टूडियो', icon: Radio },
+  { id: 'tournament-profile', labelHi: '2. टूर्नामेंट जानकारी', labelEn: '2. Tournament Profile', labelMix: '2. टूर्नामेंट प्रोफाइल (Profile)', icon: Shield },
+  { id: 'poster-maker', labelHi: '3. पोस्टर और बैनर निर्माता', labelEn: '3. Poster & Banner Maker', labelMix: '3. पोस्टर और बैनर मेकर', icon: Palette, category: 'poster' },
+  { id: 'invitation-maker', labelHi: '4. आमंत्रण पत्र निर्माता', labelEn: '4. Invitation Card Maker', labelMix: '4. आमंत्रण कार्ड मेकर', icon: Mail, category: 'invitation' },
+  { id: 'player-list-maker', labelHi: '5. 8-टीम व 15-खिलाड़ी सूची', labelEn: '5. 8-Team & 15-Player List', labelMix: '5. 8-टीम & 15-खिलाड़ी मेकर', icon: Users, category: 'player-list' },
+  { id: 'rules-maker', labelHi: '6. नियम व शर्तें पत्र', labelEn: '6. Rules & Regulations', labelMix: '6. नियम व शर्तें (Rules)', icon: ScrollText, category: 'rules' },
+  { id: 'prize-maker', labelHi: '7. पुरस्कार वितरण सूची', labelEn: '7. Prize Distribution', labelMix: '7. पुरस्कार वितरण (Prize)', icon: Trophy, category: 'prize' },
+  { id: 'certificate-maker', labelHi: '8. प्रमाण-पत्र (सर्टिफिकेट)', labelEn: '8. Certificate Maker', labelMix: '8. सर्टिफिकेट मेकर (Certificate)', icon: Award, category: 'certificate' },
+  { id: 'voucher-maker', labelHi: '9. इनाम वाउचर निर्माता', labelEn: '9. Prize Voucher Maker', labelMix: '9. प्राइज वाउचर मेकर', icon: CreditCard, category: 'voucher' },
+  { id: 'schedule-maker', labelHi: '10. मैच समय-सारणी (शेड्यूल)', labelEn: '10. 8-Team Match Schedule', labelMix: '10. 8-टीम शेड्यूल & FB पोस्ट', icon: Calendar, category: 'schedule' },
+  { id: 'result-maker', labelHi: '11. मैच परिणाम व अखबार खबर', labelEn: '11. Match Results & Press News', labelMix: '11. मैच रिजल्ट & अखबार खबर', icon: FileCheck, category: 'result' },
+  { id: 'scorecard-maker', labelHi: '12. स्कोरकार्ड व माइक प्रचार', labelEn: '12. Scorecard & Mic Announcement', labelMix: '12. स्कोरकार्ड & माइक प्रचार', icon: ClipboardList, category: 'scorecard' },
+  { id: 'letter-maker', labelHi: '13. आधिकारिक अनुमति पत्र', labelEn: '13. Official Permission Letter', labelMix: '13. आधिकारिक पत्र (Letter)', icon: FileText, category: 'letter' },
+  { id: 'template-library', labelHi: '14. सभी रेडीमेड डिज़ाइन', labelEn: '14. Template Library', labelMix: '14. टेम्पलेट लाइब्रेरी', icon: LayoutTemplate },
+  { id: 'saved-designs', labelHi: '15. मेरे सुरक्षित डिज़ाइन', labelEn: '15. My Saved Designs', labelMix: '15. मेरे सेव डिज़ाइन (Saved)', icon: FolderHeart },
+  { id: 'media-library', labelHi: '16. फोटो व लोगो संग्रह', labelEn: '16. Media & Logo Library', labelMix: '16. मीडिया व लोगो लाइब्रेरी', icon: ImageIcon },
+  { id: 'backup-restore', labelHi: '17. डेटा सुरक्षा (बैकअप)', labelEn: '17. Backup & Restore', labelMix: '17. बैकअप और रीस्टोर', icon: Database },
+  { id: 'settings', labelHi: '18. ऐप सेटिंग्स', labelEn: '18. App Settings', labelMix: '18. सेटिंग्स (Settings)', icon: Settings },
 ];
 
 export default function App() {
@@ -495,7 +498,7 @@ export default function App() {
                 : ''
             }`}
           >
-            {lang === 'hi' ? 'डैशबोर्ड' : 'Dashboard'}
+            {t3(lang, 'मुख्य पटल', 'Dashboard', 'डैशबोर्ड (Home)')}
           </button>
           <button
             onClick={() => handleNavigate('tournament-profile')}
@@ -505,7 +508,7 @@ export default function App() {
                 : ''
             }`}
           >
-            {lang === 'hi' ? 'टूर्नामेंट प्रोफाइल' : 'Tournament Profile'}
+            {t3(lang, 'टूर्नामेंट जानकारी', 'Tournament Profile', 'टूर्नामेंट प्रोफाइल')}
           </button>
           <button
             onClick={() => handleNavigate('poster-maker')}
@@ -515,7 +518,7 @@ export default function App() {
                 : ''
             }`}
           >
-            {lang === 'hi' ? 'डिज़ाइन स्टूडियो' : 'Design Editor'}
+            {t3(lang, 'डिज़ाइन कक्ष', 'Design Editor', 'डिज़ाइन स्टूडियो')}
           </button>
           <button
             onClick={() => handleNavigate('player-list-maker')}
@@ -525,7 +528,7 @@ export default function App() {
                 : ''
             }`}
           >
-            {lang === 'hi' ? '8-टीम & 15-खिलाड़ी' : '8 Teams & Players'}
+            {t3(lang, '8-टीम व खिलाड़ी', '8 Teams & Players', '8-टीम & 15-खिलाड़ी')}
           </button>
           <button
             onClick={() => handleNavigate('fb-live-studio')}
@@ -536,7 +539,9 @@ export default function App() {
             }`}
           >
             <Radio className="w-3.5 h-3.5 animate-pulse" />
-            <span>{lang === 'hi' ? '🔴 FB Live स्टूडियो' : '🔴 FB Live Studio'}</span>
+            <span>
+              {t3(lang, '🔴 लाइव स्कोरिंग', '🔴 FB Live Studio', '🔴 FB Live स्टूडियो')}
+            </span>
           </button>
           <button
             onClick={() => handleNavigate('schedule-maker')}
@@ -546,11 +551,11 @@ export default function App() {
                 : ''
             }`}
           >
-            {lang === 'hi' ? 'शेड्यूल / अखबार / प्रचार' : 'Schedule & News'}
+            {t3(lang, 'मैच व प्रचार', 'Schedule & News', 'शेड्यूल / अखबार / प्रचार')}
           </button>
         </nav>
 
-        {/* Zone 3: Laptop Full-Screen Button, Profile & Language Switch */}
+        {/* Zone 3: Laptop Full-Screen Button, Profile & 3-Mode Language Switcher */}
         <div className="flex items-center gap-1.5 shrink-0">
           <button
             type="button"
@@ -586,8 +591,8 @@ export default function App() {
           >
             <span>
               {isBrowserFullscreen || desktopSidebarHidden
-                ? '🖥️ नॉर्मल व्यू'
-                : '🖥️ फुल-स्क्रीन (Laptop)'}
+                ? t3(lang, '🖥️ सामान्य स्क्रीन', '🖥️ Exit Fullscreen', '🖥️ नॉर्मल व्यू')
+                : t3(lang, '🖥️ बड़ी स्क्रीन', '🖥️ Fullscreen (PC)', '🖥️ फुल-स्क्रीन (Laptop)')}
             </span>
           </button>
 
@@ -596,22 +601,38 @@ export default function App() {
             className="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/30 text-amber-300 text-xs font-bold cursor-pointer"
           >
             <Shield className="w-3.5 h-3.5" />
-            <span>{lang === 'hi' ? 'प्रोफाइल / लोगो' : 'Profile / Logo'}</span>
+            <span>{t3(lang, 'प्रोफाइल / लोगो', 'Profile / Logo', 'प्रोफाइल / Logo')}</span>
           </button>
 
-          <button
-            onClick={() =>
-              handleUpdateSettings({
-                ...settings,
-                language: lang === 'hi' ? 'en' : 'hi',
-              })
-            }
-            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-200 whitespace-nowrap shrink-0 cursor-pointer border border-slate-700"
-            title="Switch Hindi / English"
-          >
-            <Globe className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-            <span>{lang === 'hi' ? 'हिंदी / EN' : 'EN / हिंदी'}</span>
-          </button>
+          {/* 3-MODE LANGUAGE SWITCHER: [ हिंदी | English | हिंदी+EN ] */}
+          <div className="flex items-center bg-slate-900 p-0.5 rounded-xl border border-slate-700 shrink-0">
+            <Globe className="w-3.5 h-3.5 text-amber-400 ml-1.5 mr-1 hidden sm:inline shrink-0" />
+            {(
+              [
+                { id: 'hi' as Language, label: 'हिंदी' },
+                { id: 'en' as Language, label: 'English' },
+                { id: 'mix' as Language, label: 'हिंदी+EN' },
+              ] as const
+            ).map((opt) => (
+              <button
+                key={opt.id}
+                type="button"
+                onClick={() =>
+                  handleUpdateSettings({
+                    ...settings,
+                    language: opt.id,
+                  })
+                }
+                className={`px-2 py-1 rounded-lg text-[10px] sm:text-xs font-black transition-all cursor-pointer whitespace-nowrap ${
+                  lang === opt.id
+                    ? 'bg-amber-500 text-slate-950 shadow-xs'
+                    : 'text-slate-300 hover:text-white'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
         </div>
       </header>
 
@@ -663,7 +684,7 @@ export default function App() {
                 >
                   <Icon className="w-4 h-4 shrink-0" />
                   <span className="truncate">
-                    {lang === 'hi' ? item.labelHi : item.labelEn}
+                    {t3(lang, item.labelHi, item.labelEn, item.labelMix)}
                   </span>
                 </button>
               );
@@ -831,11 +852,11 @@ export default function App() {
       {!isCanvasMakerSection && (
         <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-30 h-14 bg-[#0B192C]/95 backdrop-blur-md border-t border-slate-800 grid grid-cols-5 items-center text-slate-300">
           {[
-            { id: 'dashboard', icon: Home, labelHi: 'होम', labelEn: 'Home' },
-            { id: 'fb-live-studio', icon: Radio, labelHi: '🔴 FB Live', labelEn: '🔴 FB Live' },
-            { id: 'player-list-maker', icon: Users, labelHi: '8-टीम/खिलाड़ी', labelEn: '8 Teams' },
-            { id: 'schedule-maker', icon: Calendar, labelHi: 'शेड्यूल/अखबार', labelEn: 'Matches' },
-            { id: 'poster-maker', icon: Palette, labelHi: 'एडिटर', labelEn: 'Editor' },
+            { id: 'dashboard', icon: Home, labelHi: 'मुख्य पटल', labelEn: 'Home', labelMix: 'होम (Home)' },
+            { id: 'fb-live-studio', icon: Radio, labelHi: '🔴 लाइव', labelEn: '🔴 FB Live', labelMix: '🔴 FB Live' },
+            { id: 'player-list-maker', icon: Users, labelHi: '8-टीम', labelEn: '8 Teams', labelMix: '8-टीम/खिलाड़ी' },
+            { id: 'schedule-maker', icon: Calendar, labelHi: 'मैच/खबर', labelEn: 'Matches', labelMix: 'शेड्यूल/प्रचार' },
+            { id: 'poster-maker', icon: Palette, labelHi: 'डिज़ाइन', labelEn: 'Editor', labelMix: 'एडिटर' },
           ].map((tab) => {
             const Icon = tab.icon;
             const active = activeSection === tab.id;
@@ -848,8 +869,8 @@ export default function App() {
                 }`}
               >
                 <Icon className="w-4 h-4" />
-                <span className="text-[10px] mt-0.5">
-                  {lang === 'hi' ? tab.labelHi : tab.labelEn}
+                <span className="text-[10px] mt-0.5 truncate max-w-full px-1">
+                  {t3(lang, tab.labelHi, tab.labelEn, tab.labelMix)}
                 </span>
               </button>
             );

@@ -888,34 +888,50 @@ export const SettingsView: React.FC<{
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-200 dark:border-slate-800">
           <div>
             <h4 className="text-sm font-extrabold text-slate-900 dark:text-white">
-              {lang === 'hi' ? 'इंटरफ़ेस भाषा (Interface Language)' : 'Interface Language'}
+              {lang === 'hi'
+                ? 'ऐप की भाषा चुनें'
+                : lang === 'en'
+                ? 'Application Language'
+                : 'इंटरफ़ेस भाषा (Interface Language)'}
             </h4>
             <p className="text-xs text-slate-500">
               {lang === 'hi'
-                ? 'डिफ़ॉल्ट भाषा हिंदी है। आप कभी भी हिंदी और अंग्रेजी के बीच बदल सकते हैं।'
-                : 'Switch between Hindi (Default) and English interface labels.'}
+                ? 'शुद्ध हिंदी, पूरी अंग्रेज़ी, या हिंदी+English मिक्स में से चुनें।'
+                : lang === 'en'
+                ? 'Choose between Pure Hindi, Pure English, or Hindi+English Mix.'
+                : 'शुद्ध हिंदी, Pure English, या हिंदी+English मिक्स चुनें।'}
             </p>
           </div>
-          <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl self-start sm:self-auto">
+          <div className="flex flex-wrap items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl self-start sm:self-auto">
             <button
               onClick={() => onUpdateSettings({ ...settings, language: 'hi' })}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold cursor-pointer ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer ${
                 settings.language === 'hi'
                   ? 'bg-slate-900 text-white dark:bg-amber-500 dark:text-slate-950'
                   : 'text-slate-600 dark:text-slate-400'
               }`}
             >
-              हिंदी (Hindi)
+              हिंदी (Pure Hindi)
             </button>
             <button
               onClick={() => onUpdateSettings({ ...settings, language: 'en' })}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold cursor-pointer ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer ${
                 settings.language === 'en'
                   ? 'bg-slate-900 text-white dark:bg-amber-500 dark:text-slate-950'
                   : 'text-slate-600 dark:text-slate-400'
               }`}
             >
-              English
+              English (Pure)
+            </button>
+            <button
+              onClick={() => onUpdateSettings({ ...settings, language: 'mix' })}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer ${
+                settings.language === 'mix'
+                  ? 'bg-slate-900 text-white dark:bg-amber-500 dark:text-slate-950'
+                  : 'text-slate-600 dark:text-slate-400'
+              }`}
+            >
+              हिंदी + English (Mix)
             </button>
           </div>
         </div>

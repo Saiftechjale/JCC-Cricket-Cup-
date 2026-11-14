@@ -1,4 +1,23 @@
-export type Language = 'hi' | 'en';
+export type Language = 'hi' | 'en' | 'mix';
+
+/**
+ * 3-Mode Language Translator:
+ * - 'hi': Pure Hindi (शुद्ध हिंदी)
+ * - 'en': Pure English (Pure English)
+ * - 'mix': Hindi + English Combined (हिंदी + English Mix)
+ */
+export function t3(
+  lang: Language,
+  hi: string,
+  en: string,
+  mix?: string
+): string {
+  if (lang === 'hi') return hi;
+  if (lang === 'en') return en;
+  if (mix) return mix;
+  if (hi === en) return hi;
+  return `${hi} (${en})`;
+}
 
 export type WorkspaceSection =
   | 'dashboard'
@@ -92,6 +111,11 @@ export interface LiveBroadcastRoomState {
   wickets: number;
   overs: number;
   balls: number;
+  extras?: number;
+  wides?: number;
+  noBalls?: number;
+  byes?: number;
+  legByes?: number;
   totalMatchOvers: number;
   targetRuns: number; // 0 if 1st innings
   tossOrStatusNote: string;
