@@ -1,10 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Award,
   Check,
   Copy,
   Eye,
   FileText,
+  History,
   Image as ImageIcon,
+  Maximize2,
   Megaphone,
   Minimize2,
   Minus,
@@ -12,18 +15,24 @@ import {
   Radio,
   RefreshCw,
   RotateCcw,
-  Smartphone,
+  Save,
+  Trash2,
+  Trophy,
   Tv,
   Undo2,
-  Users,
+  UserPlus,
 } from 'lucide-react';
 import {
+  BatsmanLiveStat,
+  BowlerLiveStat,
   BroadcastCelebrationType,
   BroadcastScreenMode,
   DesignDocument,
+  FieldingLiveStat,
   Language,
   LiveBroadcastRoomState,
   LocalSponsorAd,
+  OverSummaryRecord,
   TeamSquadRecord,
   TournamentProfile,
 } from '../types/studio';
@@ -31,6 +40,22 @@ import { exportDesignDocument } from '../utils/exportEngine';
 
 const SHARED_CLOUD_ORIGIN =
   'https://ais-pre-jyr2zrqjzkpgapapyfwsme-967710688708.asia-southeast1.run.app';
+
+const SERIES_STORAGE_KEY = 'jale_cricket_8team_series_records_v1';
+
+interface SavedMatchSummaryForSeries {
+  id: string;
+  matchLabel: string;
+  date: string;
+  battingTeamName: string;
+  bowlingTeamName: string;
+  runs: number;
+  wickets: number;
+  overs: string;
+  batsmanRecords: Record<string, BatsmanLiveStat>;
+  bowlerRecords: Record<string, BowlerLiveStat>;
+  fieldingRecords: Record<string, FieldingLiveStat>;
+}
 
 function getApiBaseOrigin(): string {
   if (typeof window === 'undefined') return '';
@@ -52,6 +77,168 @@ function getPublicShareOrigin(): string {
     return SHARED_CLOUD_ORIGIN;
   }
   return origin;
+}
+
+/**
+ * Strips leading numbering ("1. ") and trailing English bracket text ("(Jale Royal XI)")
+ * so names never clip or wrap awkwardly on the TV scoreboard.
+ */
+export function cleanBroadcastName(raw: string | undefined): string {
+  if (!raw) return '';
+  return raw
+    .replace(/^\d+\.\s*/, '')
+    .replace(/\s*\([^)]*\)\s*/g, ' ')
+    .trim();
+}
+
+export function formatBallsToOvers(balls: number): string {
+  const o = Math.floor(balls / 6);
+  const b = balls % 6;
+  return `${o}.${b}`;
+}
+
+export function computeAutoAwards(
+  batsmanRecords: Record<string, BatsmanLiveStat> = {},
+  bowlerRecords: Record<string, BowlerLiveStat> = {},
+  fieldingRecords: Record<string, FieldingLiveStat> = {}
+) {
+  const allPlayerNames = new Set<string>([
+    ...Object.keys(batsmanRecords),
+    ...Object.keys(bowlerRecords),
+    ...Object.keys(fieldingRecords),
+  ]);
+
+  const impactList: {
+    name: string;
+    team: string;
+    points: number;
+    summary: string;
+    runs: number;
+    balls: number;
+    fours: number;
+    sixes: number;
+    wickets: number;
+    ballsBowled: number;
+    runsConceded: number;
+    catches: number;
+    keepings: number;
+    runOuts: number;
+    saves: number;
+  }[] = [];
+
+  allPlayerNames.forEach((name) => {
+    if (!name.trim()) return;
+    const bat = batsmanRecords[name];
+    const bowl = bowlerRecords[name];
+    const fld = fieldingRecords[name];
+
+    const runs = bat?.runs || 0;
+    const balls = bat?.balls || 0;
+    const fours = bat?.fours || 0;
+    const sixes = bat?.sixes || 0;
+    const wickets = bowl?.wickets || 0;
+    const ballsBowled = bowl?.ballsBowled || 0;
+    const runsConceded = bowl?.runsConceded || 0;
+    const dots = bowl?.dots || 0;
+    const catches = fld?.catches || 0;
+    const keepings = fld?.keepings || 0;
+    const runOuts = fld?.runOuts || 0;
+    const saves = fld?.saves || 0;
+
+    // Impact Points Formula for Tennis Ball Tournament
+    let points =
+      runs * 1.2 +
+      fours * 2 +
+      sixes * 4 +
+      (runs >= 50 ? 20 : runs >= 30 ? 10 : 0) +
+      wickets * 25 +
+      dots * 1.5 +
+      (wickets >= 3 ? 15 : 0) +
+      catches * 12 +
+      keepings * 15 +
+      runOuts * 14 +
+      saves * 8;
+
+    points = Math.round(points);
+
+    const parts: string[] = [];
+    if (runs > 0 || balls > 0) parts.push(`${runs}(${balls}) रन`);
+    if (wickets > 0 || ballsBowled > 0)
+      parts.push(`${wickets}/${runsConceded} (${formatBallsToOvers(ballsBowled)} Ov)`);
+    if (catches > 0) parts.push(`${catches} कैच`);
+    if (keepings > 0) parts.push(`${keepings} कीपिंग`);
+    if (runOuts > 0) parts.push(`${runOuts} रन-आउट`);
+    if (saves > 0) parts.push(`${saves} बाउंड्री सेव`);
+
+    impactList.push({
+      name,
+      team: bat?.team || bowl?.team || fld?.team || '',
+      points,
+      summary: parts.join(' • ') || '0 पॉइंट्स',
+      runs,
+      balls,
+      fours,
+      sixes,
+      wickets,
+      ballsBowled,
+      runsConceded,
+      catches,
+      keepings,
+      runOuts,
+      saves,
+    });
+  });
+
+  const manOfTheMatch = [...impactList].sort((a, b) => b.points - a.points)[0] || null;
+
+  const bestBatsman =
+    [...impactList]
+      .filter((p) => p.runs > 0 || p.balls > 0)
+      .sort((a, b) => {
+        if (b.runs !== a.runs) return b.runs - a.runs;
+        const srA = a.balls > 0 ? a.runs / a.balls : 0;
+        const srB = b.balls > 0 ? b.runs / b.balls : 0;
+        return srB - srA;
+      })[0] || null;
+
+  const bestBowler =
+    [...impactList]
+      .filter((p) => p.wickets > 0 || p.ballsBowled > 0)
+      .sort((a, b) => {
+        if (b.wickets !== a.wickets) return b.wickets - a.wickets;
+        const ecoA = a.ballsBowled > 0 ? a.runsConceded / (a.ballsBowled / 6) : 99;
+        const ecoB = b.ballsBowled > 0 ? b.runsConceded / (b.ballsBowled / 6) : 99;
+        return ecoA - ecoB;
+      })[0] || null;
+
+  const bestCatch =
+    [...impactList]
+      .filter((p) => p.catches > 0)
+      .sort((a, b) => b.catches - a.catches)[0] || null;
+
+  const bestKeeper =
+    [...impactList]
+      .filter((p) => p.keepings > 0)
+      .sort((a, b) => b.keepings - a.keepings)[0] || null;
+
+  const bestFielder =
+    [...impactList]
+      .filter((p) => p.catches + p.runOuts + p.saves > 0)
+      .sort(
+        (a, b) =>
+          b.catches * 2 + b.runOuts * 2 + b.saves -
+          (a.catches * 2 + a.runOuts * 2 + a.saves)
+      )[0] || null;
+
+  return {
+    impactList: [...impactList].sort((a, b) => b.points - a.points),
+    manOfTheMatch,
+    bestBatsman,
+    bestBowler,
+    bestCatch,
+    bestKeeper,
+    bestFielder,
+  };
 }
 
 interface FBLiveBroadcastStudioViewProps {
@@ -98,19 +285,40 @@ export const BroadcastOverlayCanvas: React.FC<{
   const isScoreVisible = state.showScoreboard !== false;
   const isTopBadgeVisible = state.showTopBadge !== false;
 
+  const cleanTeamA = cleanBroadcastName(state.battingTeamName) || 'टीम A';
+  const cleanTeamB = cleanBroadcastName(state.bowlingTeamName) || 'टीम B';
+  const cleanStriker = cleanBroadcastName(state.strikerName) || 'बल्लेबाज 1';
+  const cleanNonStriker = cleanBroadcastName(state.nonStrikerName) || 'बल्लेबाज 2';
+  const cleanBowler = cleanBroadcastName(state.bowlerName) || 'गेंदबाज';
+
+  const lastOverObj =
+    state.overHistory && state.overHistory.length > 0
+      ? state.overHistory[state.overHistory.length - 1]
+      : null;
+
+  const autoAwards = useMemo(
+    () =>
+      computeAutoAwards(
+        state.batsmanRecords,
+        state.bowlerRecords,
+        state.fieldingRecords
+      ),
+    [state.batsmanRecords, state.bowlerRecords, state.fieldingRecords]
+  );
+
   return (
     <div
       style={{
         backgroundColor: transparentBg ? 'transparent' : undefined,
       }}
-      className={`relative w-full h-full flex flex-col justify-between select-none overflow-hidden ${
+      className={`relative w-full flex flex-col justify-between select-none overflow-hidden ${
         transparentBg
-          ? ''
-          : 'bg-gradient-to-b from-emerald-950/90 via-slate-900/75 to-slate-950'
+          ? 'min-h-screen h-screen'
+          : 'bg-gradient-to-b from-emerald-950 via-slate-900 to-slate-950'
       } ${
         compactPreview
-          ? 'aspect-video rounded-2xl border-2 border-slate-700 shadow-2xl'
-          : 'min-h-screen'
+          ? 'min-h-[300px] sm:min-h-[350px] rounded-2xl border-2 border-slate-700 shadow-2xl'
+          : 'h-full min-h-0'
       }`}
     >
       {/* Simulated Camera Area label only in studio preview */}
@@ -130,49 +338,49 @@ export const BroadcastOverlayCanvas: React.FC<{
       )}
 
       {/* =====================================================================
-          TOP CORNER BUGS
+          TOP CORNER BUGS (COMPACT & NON-INTRUSIVE)
       ===================================================================== */}
       {isTopBadgeVisible ? (
-        <div className="relative z-10 flex items-start justify-between gap-2 p-2.5 sm:p-4 pointer-events-none">
-          <div className="flex items-center gap-2 bg-[#0B192C]/92 border border-amber-400/80 px-2.5 sm:px-3.5 py-1 sm:py-1.5 rounded-xl shadow-lg">
-            <span className="inline-flex items-center gap-1 bg-red-600 text-white text-[10px] sm:text-xs font-black px-2 py-0.5 rounded-md animate-pulse">
-              <span className="w-2 h-2 rounded-full bg-white" />
+        <div className="relative z-10 flex items-start justify-between gap-2 px-2.5 pt-2 sm:px-4 sm:pt-3 pointer-events-none shrink-0">
+          <div className="flex items-center gap-2 bg-[#0B192C]/95 border border-amber-400/80 px-2.5 py-1 rounded-xl shadow-lg max-w-full">
+            <span className="inline-flex items-center gap-1 bg-red-600 text-white text-[9px] sm:text-[11px] font-black px-1.5 py-0.5 rounded animate-pulse shrink-0">
+              <span className="w-1.5 h-1.5 rounded-full bg-white" />
               LIVE
             </span>
-            <div className="leading-tight">
-              <div className="text-[11px] sm:text-xs font-black text-amber-400 tracking-wide">
+            <div className="leading-tight min-w-0">
+              <div className="text-[10px] sm:text-xs font-black text-amber-400 truncate">
                 {state.tournamentName}
               </div>
-              <div className="text-[9px] sm:text-[10px] font-bold text-slate-300">
+              <div className="text-[8px] sm:text-[10px] font-bold text-slate-300 truncate">
                 {state.matchStage} • {state.seasonNumber}
               </div>
             </div>
           </div>
 
           {state.showSponsorTicker && activeSponsor && (
-            <div className="hidden sm:flex flex-col items-end bg-slate-950/90 border border-amber-400/60 px-3 py-1 rounded-xl shadow-lg max-w-xs">
-              <span className="text-[9px] font-black uppercase tracking-wider text-amber-400">
+            <div className="hidden sm:flex flex-col items-end bg-slate-950/90 border border-amber-400/60 px-2.5 py-1 rounded-xl shadow-lg max-w-xs shrink-0">
+              <span className="text-[8px] font-black uppercase tracking-wider text-amber-400">
                 📢 प्रायोजक (SPONSOR)
               </span>
-              <span className="text-xs font-black text-white truncate max-w-[220px]">
+              <span className="text-[11px] font-black text-white truncate max-w-[200px]">
                 {activeSponsor.shopName}
               </span>
             </div>
           )}
         </div>
       ) : (
-        <div />
+        <div className="shrink-0" />
       )}
 
       {/* =====================================================================
-          CENTER DYNAMIC BROADCAST GRAPHICS (SQUAD / FULL AD / CELEBRATION)
+          CENTER DYNAMIC BROADCAST GRAPHICS (SQUAD / SCORECARD / AWARDS / AD / CELEBRATION)
       ===================================================================== */}
-      <div className="relative z-20 flex-1 flex items-center justify-center px-3 sm:px-8 py-1 pointer-events-none">
+      <div className="relative z-20 flex-1 min-h-0 flex items-center justify-center px-2.5 sm:px-6 py-1 pointer-events-none overflow-y-auto">
         {/* 1. 4 / 6 / WICKET CELEBRATION POPUP */}
         {showCelebration && (
           <div className="w-full max-w-2xl rounded-3xl bg-gradient-to-r from-red-700 via-amber-500 to-red-700 p-1 shadow-2xl animate-bounce">
-            <div className="bg-[#0B192C] rounded-[20px] px-5 py-4 sm:py-6 text-center space-y-2 border-2 border-amber-300">
-              <div className="inline-block px-3 py-0.5 rounded-full bg-amber-400 text-slate-950 text-xs font-black uppercase tracking-widest">
+            <div className="bg-[#0B192C] rounded-[20px] px-4 py-3 sm:py-5 text-center space-y-1.5 border-2 border-amber-300">
+              <div className="inline-block px-3 py-0.5 rounded-full bg-amber-400 text-slate-950 text-[10px] sm:text-xs font-black uppercase tracking-widest">
                 {state.celebration === 'SIX'
                   ? '🚀 MAXIMUM SIXER • 6 RUNS!'
                   : state.celebration === 'FOUR'
@@ -181,11 +389,11 @@ export const BroadcastOverlayCanvas: React.FC<{
                   ? '🎯 BIG WICKET DOWN • OUT!'
                   : '⭐ MILESTONE CELEBRATION!'}
               </div>
-              <div className="text-2xl sm:text-4xl font-black text-white tracking-tight">
+              <div className="text-xl sm:text-3xl font-black text-white tracking-tight">
                 {state.celebrationText}
               </div>
               {activeSponsor && (
-                <div className="pt-2 border-t border-white/15 text-xs sm:text-sm font-extrabold text-amber-300">
+                <div className="pt-1.5 border-t border-white/15 text-[11px] sm:text-xs font-extrabold text-amber-300">
                   📢 प्रायोजक:{' '}
                   <span className="text-white">{activeSponsor.shopName}</span> (
                   {activeSponsor.address}) — {activeSponsor.tagline}
@@ -200,25 +408,25 @@ export const BroadcastOverlayCanvas: React.FC<{
           (state.screenMode === 'squad-team-a' ||
             state.screenMode === 'squad-team-b') && (
             <div className="w-full max-w-3xl rounded-2xl bg-[#0B192C]/96 border-2 border-amber-400 text-white shadow-2xl overflow-hidden">
-              <div className="bg-gradient-to-r from-red-700 via-amber-500 to-blue-900 px-4 py-2.5 flex items-center justify-between">
+              <div className="bg-gradient-to-r from-red-700 via-amber-500 to-blue-900 px-3 sm:px-4 py-2 flex items-center justify-between">
                 <div>
-                  <span className="text-[10px] font-black uppercase tracking-wider text-slate-950 bg-amber-300 px-2 py-0.5 rounded">
+                  <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-wider text-slate-950 bg-amber-300 px-2 py-0.5 rounded">
                     15-खिलाड़ी सूची (11 PLAYING XI + 4 EXTRA)
                   </span>
-                  <h3 className="text-base sm:text-xl font-black text-white mt-0.5">
+                  <h3 className="text-sm sm:text-lg font-black text-white mt-0.5">
                     🏏{' '}
                     {state.screenMode === 'squad-team-a'
-                      ? state.battingTeamName
-                      : state.bowlingTeamName}
+                      ? cleanTeamA
+                      : cleanTeamB}
                   </h3>
                 </div>
-                <div className="text-right text-xs font-extrabold text-amber-200">
+                <div className="text-right text-[10px] font-extrabold text-amber-200">
                   <div>{state.tournamentName}</div>
-                  <div className="text-[10px] text-white">{state.venue}</div>
+                  <div className="text-white">{state.venue}</div>
                 </div>
               </div>
 
-              <div className="p-3 sm:p-4 grid grid-cols-2 sm:grid-cols-3 gap-1.5 sm:gap-2">
+              <div className="p-2.5 sm:p-3 grid grid-cols-2 sm:grid-cols-3 gap-1.5">
                 {(state.screenMode === 'squad-team-a'
                   ? state.teamAPlayers
                   : state.teamBPlayers
@@ -229,14 +437,14 @@ export const BroadcastOverlayCanvas: React.FC<{
                     return (
                       <div
                         key={idx}
-                        className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border text-xs font-extrabold ${
+                        className={`flex items-center gap-1.5 px-2 py-1 rounded-lg border text-[11px] font-extrabold ${
                           isExtra
                             ? 'bg-amber-950/60 border-amber-500/40 text-amber-200'
                             : 'bg-slate-900/90 border-white/15 text-white'
                         }`}
                       >
                         <span
-                          className={`w-5 h-5 rounded-md flex items-center justify-center text-[10px] font-mono font-black shrink-0 ${
+                          className={`w-4 h-4 rounded flex items-center justify-center text-[9px] font-mono font-black shrink-0 ${
                             idx === 0
                               ? 'bg-red-600 text-white'
                               : isExtra
@@ -247,13 +455,8 @@ export const BroadcastOverlayCanvas: React.FC<{
                           {idx + 1}
                         </span>
                         <span className="truncate">
-                          {pName || `खिलाड़ी ${idx + 1}`}
+                          {cleanBroadcastName(pName) || `खिलाड़ी ${idx + 1}`}
                         </span>
-                        {idx === 0 && (
-                          <span className="ml-auto text-[9px] bg-amber-400 text-slate-950 px-1 rounded font-black">
-                            C
-                          </span>
-                        )}
                       </div>
                     );
                   })}
@@ -264,51 +467,50 @@ export const BroadcastOverlayCanvas: React.FC<{
         {/* 3. BOTH TEAMS SIDE-BY-SIDE SQUAD COMPARISON */}
         {!showCelebration && state.screenMode === 'squad-vs-both' && (
           <div className="w-full max-w-4xl rounded-2xl bg-[#0B192C]/96 border-2 border-amber-400 text-white shadow-2xl overflow-hidden">
-            <div className="bg-gradient-to-r from-blue-900 via-red-700 to-blue-900 px-4 py-2 text-center">
-              <div className="text-[10px] font-black text-amber-300 uppercase tracking-widest">
-                {state.tournamentName} • दोनों टीमों की खिलाड़ी सूची
+            <div className="bg-gradient-to-r from-blue-900 via-red-700 to-blue-900 px-3 py-1.5 text-center">
+              <div className="text-[9px] font-black text-amber-300 uppercase tracking-widest">
+                {state.tournamentName} • दोनों टीमों की 15-खिलाड़ी सूची
               </div>
-              <div className="text-sm sm:text-lg font-black text-white">
-                {state.battingTeamName}{' '}
-                <span className="text-amber-400 mx-2">VS</span>{' '}
-                {state.bowlingTeamName}
+              <div className="text-xs sm:text-base font-black text-white">
+                {cleanTeamA} <span className="text-amber-400 mx-1.5">VS</span>{' '}
+                {cleanTeamB}
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-2 sm:gap-4 p-3 sm:p-4">
+            <div className="grid grid-cols-2 gap-2 sm:gap-3 p-2.5 sm:p-3">
               <div className="space-y-1">
-                <div className="bg-blue-700 text-white px-2.5 py-1 rounded-lg text-xs font-black truncate">
-                  🏏 {state.battingTeamName}
+                <div className="bg-blue-700 text-white px-2 py-1 rounded-lg text-[11px] font-black truncate">
+                  🏏 {cleanTeamA}
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-1">
                   {state.teamAPlayers.slice(0, 15).map((p, idx) => (
                     <div
                       key={idx}
-                      className="px-2 py-0.5 rounded bg-slate-900 border border-white/10 text-[11px] font-bold truncate"
+                      className="px-1.5 py-0.5 rounded bg-slate-900 border border-white/10 text-[10px] font-bold truncate"
                     >
                       <span className="text-amber-400 font-mono mr-1">
                         {idx + 1}.
                       </span>
-                      {p}
+                      {cleanBroadcastName(p)}
                     </div>
                   ))}
                 </div>
               </div>
 
               <div className="space-y-1">
-                <div className="bg-red-700 text-white px-2.5 py-1 rounded-lg text-xs font-black truncate">
-                  ⚾ {state.bowlingTeamName}
+                <div className="bg-red-700 text-white px-2 py-1 rounded-lg text-[11px] font-black truncate">
+                  ⚾ {cleanTeamB}
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-1">
                   {state.teamBPlayers.slice(0, 15).map((p, idx) => (
                     <div
                       key={idx}
-                      className="px-2 py-0.5 rounded bg-slate-900 border border-white/10 text-[11px] font-bold truncate"
+                      className="px-1.5 py-0.5 rounded bg-slate-900 border border-white/10 text-[10px] font-bold truncate"
                     >
                       <span className="text-amber-400 font-mono mr-1">
                         {idx + 1}.
                       </span>
-                      {p}
+                      {cleanBroadcastName(p)}
                     </div>
                   ))}
                 </div>
@@ -317,23 +519,198 @@ export const BroadcastOverlayCanvas: React.FC<{
           </div>
         )}
 
-        {/* 4. FULL-SCREEN BREAK SPONSOR AD */}
+        {/* 4. FULL MATCH SCORECARD ON-SCREEN GRAPHIC */}
+        {!showCelebration && state.screenMode === 'full-scorecard' && (
+          <div className="w-full max-w-4xl rounded-2xl bg-[#0B192C]/96 border-2 border-amber-400 text-white shadow-2xl overflow-hidden">
+            <div className="bg-gradient-to-r from-[#091326] via-blue-900 to-[#091326] px-4 py-2 flex items-center justify-between border-b border-amber-400/40">
+              <div>
+                <div className="text-[10px] font-black text-amber-300 uppercase">
+                  📊 पूरा मैच स्कोरकार्ड ({state.tournamentName})
+                </div>
+                <div className="text-sm sm:text-lg font-black text-white">
+                  {cleanTeamA}: {state.runs}/{state.wickets} ({state.overs}.
+                  {state.balls} Ov) vs {cleanTeamB}
+                </div>
+              </div>
+              <div className="text-right text-xs font-mono font-black text-amber-400">
+                CRR: {crr}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 p-3 text-[11px]">
+              {/* Batsmen Table */}
+              <div className="bg-slate-900/90 rounded-xl p-2 border border-white/10">
+                <div className="text-amber-300 font-black mb-1 border-b border-white/10 pb-1 flex justify-between">
+                  <span>🏏 बल्लेबाज (Batsmen)</span>
+                  <span>R (B) • 4s/6s</span>
+                </div>
+                <div className="space-y-1 max-h-36 overflow-y-auto">
+                  {Object.values(state.batsmanRecords || {}).map((b, i) => (
+                    <div
+                      key={i}
+                      className="flex items-center justify-between py-0.5 border-b border-white/5"
+                    >
+                      <span className="font-bold truncate max-w-[140px]">
+                        {cleanBroadcastName(b.name)}{' '}
+                        {b.isOut ? (
+                          <span className="text-red-400 text-[9px]">
+                            ({b.dismissalText || 'OUT'})
+                          </span>
+                        ) : (
+                          <span className="text-emerald-400">*</span>
+                        )}
+                      </span>
+                      <span className="font-mono font-black text-white">
+                        {b.runs}({b.balls}){' '}
+                        <span className="text-[9px] text-amber-300">
+                          [{b.fours}×4, {b.sixes}×6]
+                        </span>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Bowlers + Previous Overs */}
+              <div className="bg-slate-900/90 rounded-xl p-2 border border-white/10 space-y-2">
+                <div>
+                  <div className="text-sky-300 font-black mb-1 border-b border-white/10 pb-1 flex justify-between">
+                    <span>⚾ गेंदबाज (Bowlers)</span>
+                    <span>O - R - W</span>
+                  </div>
+                  <div className="space-y-1 max-h-24 overflow-y-auto">
+                    {Object.values(state.bowlerRecords || {}).map((bw, i) => (
+                      <div
+                        key={i}
+                        className="flex items-center justify-between py-0.5 border-b border-white/5"
+                      >
+                        <span className="font-bold truncate max-w-[140px]">
+                          {cleanBroadcastName(bw.name)}
+                        </span>
+                        <span className="font-mono font-black text-white">
+                          {formatBallsToOvers(bw.ballsBowled)} -{' '}
+                          {bw.runsConceded} -{' '}
+                          <span className="text-amber-400">{bw.wickets}W</span>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 5. AUTOMATIC AWARDS CEREMONY ON-SCREEN GRAPHIC */}
+        {!showCelebration && state.screenMode === 'awards-ceremony' && (
+          <div className="w-full max-w-3xl rounded-2xl bg-gradient-to-br from-[#0B192C] via-slate-900 to-[#0B192C] border-2 border-amber-400 text-white shadow-2xl p-3 sm:p-4 space-y-2.5">
+            <div className="text-center border-b border-amber-400/30 pb-1.5">
+              <span className="text-[10px] font-black uppercase tracking-widest bg-amber-400 text-slate-950 px-2.5 py-0.5 rounded-full">
+                🏆 ऑटोमैटिक मैच अवार्ड्स लीडरबोर्ड ({state.tournamentName})
+              </span>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
+              <div className="bg-amber-500/20 border border-amber-400 rounded-xl p-2">
+                <div className="text-[10px] font-black text-amber-300">
+                  🏅 MAN OF THE MATCH
+                </div>
+                <div className="font-black text-white truncate mt-0.5">
+                  {cleanBroadcastName(autoAwards.manOfTheMatch?.name) || '—'}
+                </div>
+                <div className="text-[10px] text-amber-200 truncate">
+                  {autoAwards.manOfTheMatch?.summary || ''}
+                </div>
+              </div>
+              <div className="bg-blue-500/20 border border-blue-400 rounded-xl p-2">
+                <div className="text-[10px] font-black text-sky-300">
+                  🏏 BEST BATSMAN
+                </div>
+                <div className="font-black text-white truncate mt-0.5">
+                  {cleanBroadcastName(autoAwards.bestBatsman?.name) || '—'}
+                </div>
+                <div className="text-[10px] text-sky-200 truncate">
+                  {autoAwards.bestBatsman
+                    ? `${autoAwards.bestBatsman.runs} रन (${autoAwards.bestBatsman.balls} गेंद)`
+                    : ''}
+                </div>
+              </div>
+              <div className="bg-emerald-500/20 border border-emerald-400 rounded-xl p-2">
+                <div className="text-[10px] font-black text-emerald-300">
+                  ⚾ BEST BOWLER
+                </div>
+                <div className="font-black text-white truncate mt-0.5">
+                  {cleanBroadcastName(autoAwards.bestBowler?.name) || '—'}
+                </div>
+                <div className="text-[10px] text-emerald-200 truncate">
+                  {autoAwards.bestBowler
+                    ? `${autoAwards.bestBowler.wickets} विकेट (${autoAwards.bestBowler.runsConceded} रन)`
+                    : ''}
+                </div>
+              </div>
+              <div className="bg-purple-500/20 border border-purple-400 rounded-xl p-2">
+                <div className="text-[10px] font-black text-purple-300">
+                  🙌 BEST CATCH
+                </div>
+                <div className="font-black text-white truncate mt-0.5">
+                  {cleanBroadcastName(autoAwards.bestCatch?.name) || '—'}
+                </div>
+                <div className="text-[10px] text-purple-200">
+                  {autoAwards.bestCatch
+                    ? `${autoAwards.bestCatch.catches} कैच`
+                    : 'कोई कैच दर्ज नहीं'}
+                </div>
+              </div>
+              <div className="bg-rose-500/20 border border-rose-400 rounded-xl p-2">
+                <div className="text-[10px] font-black text-rose-300">
+                  🧤 BEST KEEPING
+                </div>
+                <div className="font-black text-white truncate mt-0.5">
+                  {cleanBroadcastName(autoAwards.bestKeeper?.name) || '—'}
+                </div>
+                <div className="text-[10px] text-rose-200">
+                  {autoAwards.bestKeeper
+                    ? `${autoAwards.bestKeeper.keepings} स्टंप/कैच`
+                    : 'कोई कीपिंग दर्ज नहीं'}
+                </div>
+              </div>
+              <div className="bg-teal-500/20 border border-teal-400 rounded-xl p-2">
+                <div className="text-[10px] font-black text-teal-300">
+                  ⚡ BEST FIELDER
+                </div>
+                <div className="font-black text-white truncate mt-0.5">
+                  {cleanBroadcastName(autoAwards.bestFielder?.name) || '—'}
+                </div>
+                <div className="text-[10px] text-teal-200">
+                  {autoAwards.bestFielder
+                    ? `${
+                        autoAwards.bestFielder.catches +
+                        autoAwards.bestFielder.runOuts +
+                        autoAwards.bestFielder.saves
+                      } फील्डिंग पॉइंट्स`
+                    : 'कोई फील्डिंग दर्ज नहीं'}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 6. FULL-SCREEN BREAK SPONSOR AD */}
         {!showCelebration &&
           state.screenMode === 'full-sponsor-ad' &&
           activeSponsor && (
-            <div className="w-full max-w-2xl rounded-3xl bg-gradient-to-br from-[#0B192C] via-[#1E3A8A] to-[#0B192C] border-4 border-amber-400 p-5 sm:p-8 text-center text-white shadow-2xl space-y-3">
-              <span className="inline-block px-3 py-1 rounded-full bg-amber-400 text-slate-950 text-xs font-black uppercase">
+            <div className="w-full max-w-2xl rounded-3xl bg-gradient-to-br from-[#0B192C] via-[#1E3A8A] to-[#0B192C] border-4 border-amber-400 p-4 sm:p-6 text-center text-white shadow-2xl space-y-2">
+              <span className="inline-block px-3 py-0.5 rounded-full bg-amber-400 text-slate-950 text-[10px] sm:text-xs font-black uppercase">
                 📢 टूर्नामेंट प्रायोजक विज्ञापन (OFFICIAL SPONSOR)
               </span>
-              <h2 className="text-2xl sm:text-4xl font-black text-amber-300 leading-tight">
+              <h2 className="text-xl sm:text-3xl font-black text-amber-300 leading-tight">
                 🏪 {activeSponsor.shopName}
               </h2>
-              <p className="text-sm sm:text-lg font-extrabold text-white bg-red-600/90 py-2 px-4 rounded-xl">
+              <p className="text-xs sm:text-base font-extrabold text-white bg-red-600/90 py-1.5 px-3 rounded-xl">
                 “{activeSponsor.tagline}”
               </p>
-              <div className="text-xs sm:text-base font-bold text-sky-200 space-y-1 pt-1">
+              <div className="text-xs sm:text-sm font-bold text-sky-200 space-y-0.5 pt-0.5">
                 <div>📍 पता: {activeSponsor.address}</div>
-                <div className="text-amber-300 text-sm sm:text-lg font-black">
+                <div className="text-amber-300 text-xs sm:text-base font-black">
                   👤 प्रोप्राइटर: {activeSponsor.ownerName} • 📞 मोबाइल:{' '}
                   {activeSponsor.mobile}
                 </div>
@@ -343,64 +720,63 @@ export const BroadcastOverlayCanvas: React.FC<{
       </div>
 
       {/* =====================================================================
-          BOTTOM TV LOWER-THIRD SCOREBOARD + AUTO SPONSOR AD (TOGGLEABLE ON/OFF)
+          BOTTOM TV LOWER-THIRD SCOREBOARD + AUTO SPONSOR AD (ZERO CLIPPING!)
       ===================================================================== */}
-      <div className="relative z-20 w-full px-2 sm:px-4 pb-2 sm:pb-3 space-y-1.5 pointer-events-none">
-        {/* Main TV Score Strip — Hides cleanly when showScoreboard is OFF */}
+      <div className="relative z-20 w-full px-2 sm:px-3.5 pb-2.5 sm:pb-3.5 space-y-1.5 pointer-events-none shrink-0">
+        {/* Main TV Score Strip — Redesigned so NOTHING ever gets cut off or wrapped awkwardly */}
         {isScoreVisible && (
-          <div className="w-full rounded-2xl bg-gradient-to-r from-[#091326]/96 via-[#1E3A8A]/96 to-[#091326]/96 border-2 border-amber-400 shadow-2xl px-3 sm:px-5 py-2 sm:py-2.5 text-white">
-            <div className="grid grid-cols-12 gap-2 items-center">
-              <div className="col-span-12 sm:col-span-5 flex items-center justify-between sm:justify-start gap-3 border-b sm:border-b-0 sm:border-r border-white/15 pb-1.5 sm:pb-0 sm:pr-3">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-xs sm:text-sm font-black text-amber-300 truncate">
-                      {state.battingTeamName}
-                    </span>
-                    <span className="text-[10px] font-bold text-slate-300">
-                      vs {state.bowlingTeamName}
-                    </span>
-                  </div>
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-2xl sm:text-3xl font-black font-mono tracking-tight text-white tabular-nums">
-                      {state.runs}/{state.wickets}
-                    </span>
-                    <span className="text-xs sm:text-sm font-mono font-extrabold text-amber-400">
-                      ({state.overs}.{state.balls}/{state.totalMatchOvers} Ov)
-                    </span>
-                  </div>
-                </div>
-
-                <div className="text-right sm:ml-auto shrink-0">
-                  <div className="text-[10px] font-extrabold text-sky-300">
-                    CRR: {crr}
-                  </div>
-                  {state.targetRuns > 0 ? (
-                    <div className="text-[10px] sm:text-[11px] font-black bg-emerald-600 px-2 py-0.5 rounded text-white">
-                      Target: {state.targetRuns} (Need {runsNeeded} in{' '}
-                      {totalBallsRemaining}b)
-                    </div>
-                  ) : (
-                    <div className="text-[10px] font-bold text-amber-200 max-w-[140px] truncate">
-                      {state.tossOrStatusNote}
-                    </div>
-                  )}
-                </div>
+          <div className="w-full rounded-2xl bg-gradient-to-r from-[#091326]/98 via-[#1E3A8A]/98 to-[#091326]/98 border-2 border-amber-400 shadow-2xl px-2.5 sm:px-4 py-1.5 sm:py-2 text-white space-y-1">
+            {/* ROW 1: FULL-WIDTH TEAMS + TOTAL SCORE + TARGET/CRR (NO TRUNCATION!) */}
+            <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 border-b border-white/15 pb-1">
+              <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 min-w-0">
+                <span className="text-xs sm:text-sm font-black text-amber-300">
+                  {cleanTeamA}
+                </span>
+                <span className="text-[10px] sm:text-xs font-bold text-slate-300">
+                  vs {cleanTeamB}
+                </span>
+                <span className="text-xl sm:text-2xl font-black font-mono tracking-tight text-white tabular-nums ml-1">
+                  {state.runs}/{state.wickets}
+                </span>
+                <span className="text-[11px] sm:text-xs font-mono font-extrabold text-amber-400">
+                  ({state.overs}.{state.balls}/{state.totalMatchOvers} Ov)
+                </span>
               </div>
 
-              <div className="col-span-7 sm:col-span-4 grid grid-cols-1 gap-0.5 border-r border-white/15 pr-2 text-xs">
+              <div className="flex items-center gap-2 ml-auto shrink-0">
+                <span className="text-[10px] font-extrabold text-sky-300">
+                  CRR: {crr}
+                </span>
+                {state.targetRuns > 0 ? (
+                  <span className="text-[10px] sm:text-[11px] font-black bg-emerald-600 px-2 py-0.5 rounded text-white">
+                    Target: {state.targetRuns} (Need {runsNeeded} in{' '}
+                    {totalBallsRemaining}b)
+                  </span>
+                ) : (
+                  <span className="text-[10px] font-bold text-amber-200">
+                    {state.tossOrStatusNote}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* ROW 2: BOTH BATSMEN + CURRENT BOWLER + THIS OVER & LAST OVER */}
+            <div className="grid grid-cols-12 gap-1.5 sm:gap-2 items-center text-[11px] sm:text-xs">
+              {/* Both Batsmen */}
+              <div className="col-span-7 sm:col-span-5 grid grid-cols-1 gap-0.5 border-r border-white/15 pr-1.5">
                 <div className="flex items-center justify-between font-black text-amber-300">
-                  <span className="truncate">🏏 {state.strikerName}*</span>
-                  <span className="font-mono tabular-nums ml-2">
-                    {state.strikerRuns}{' '}
+                  <span className="truncate">🏏 {cleanStriker}*</span>
+                  <span className="font-mono tabular-nums ml-1 shrink-0">
+                    {state.strikerRuns}
                     <span className="text-[10px] text-slate-300">
                       ({state.strikerBalls})
                     </span>
                   </span>
                 </div>
                 <div className="flex items-center justify-between font-bold text-slate-200">
-                  <span className="truncate">🏏 {state.nonStrikerName}</span>
-                  <span className="font-mono tabular-nums ml-2">
-                    {state.nonStrikerRuns}{' '}
+                  <span className="truncate">🏏 {cleanNonStriker}</span>
+                  <span className="font-mono tabular-nums ml-1 shrink-0">
+                    {state.nonStrikerRuns}
                     <span className="text-[10px] text-slate-400">
                       ({state.nonStrikerBalls})
                     </span>
@@ -408,36 +784,50 @@ export const BroadcastOverlayCanvas: React.FC<{
                 </div>
               </div>
 
-              <div className="col-span-5 sm:col-span-3 flex flex-col justify-between text-xs pl-1">
+              {/* Current Bowler + This Over & Last Over */}
+              <div className="col-span-5 sm:col-span-7 flex flex-col justify-between pl-0.5 gap-0.5">
                 <div className="flex items-center justify-between font-extrabold text-sky-300">
-                  <span className="truncate">⚾ {state.bowlerName}</span>
-                  <span className="font-mono text-white ml-1">
-                    {state.bowlerWickets}-{state.bowlerRuns}
+                  <span className="truncate">⚾ {cleanBowler}</span>
+                  <span className="font-mono text-white ml-1 shrink-0">
+                    {state.bowlerWickets}-{state.bowlerRuns}{' '}
+                    <span className="text-[10px] text-amber-300">
+                      ({state.bowlerOvers || '0.0'})
+                    </span>
                   </span>
                 </div>
-                <div className="flex items-center gap-1 mt-1 overflow-x-auto no-scrollbar">
-                  <span className="text-[9px] font-bold text-slate-400 uppercase shrink-0">
-                    Over:
-                  </span>
-                  {(state.thisOverBalls.length > 0
-                    ? state.thisOverBalls
-                    : ['•']
-                  ).map((b, idx) => (
-                    <span
-                      key={idx}
-                      className={`w-4 h-4 sm:w-5 sm:h-5 rounded-full flex items-center justify-center text-[9px] sm:text-[10px] font-mono font-black shrink-0 ${
-                        b === '6'
-                          ? 'bg-amber-400 text-slate-950'
-                          : b === '4'
-                          ? 'bg-emerald-500 text-white'
-                          : b === 'W'
-                          ? 'bg-red-600 text-white'
-                          : 'bg-slate-800 text-slate-200 border border-white/20'
-                      }`}
-                    >
-                      {b}
+
+                <div className="flex flex-wrap items-center justify-between gap-1">
+                  <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
+                    <span className="text-[9px] font-bold text-slate-400 uppercase shrink-0">
+                      Over:
                     </span>
-                  ))}
+                    {(state.thisOverBalls.length > 0
+                      ? state.thisOverBalls
+                      : ['•']
+                    ).map((b, idx) => (
+                      <span
+                        key={idx}
+                        className={`w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-mono font-black shrink-0 ${
+                          b === '6'
+                            ? 'bg-amber-400 text-slate-950'
+                            : b === '4'
+                            ? 'bg-emerald-500 text-white'
+                            : b === 'W'
+                            ? 'bg-red-600 text-white'
+                            : 'bg-slate-800 text-slate-200 border border-white/20'
+                        }`}
+                      >
+                        {b}
+                      </span>
+                    ))}
+                  </div>
+
+                  {lastOverObj && (
+                    <span className="hidden sm:inline-block text-[9px] font-bold text-amber-200 bg-slate-900/90 px-1.5 py-0.5 rounded border border-white/10 truncate">
+                      पिछला ओवर ({cleanBroadcastName(lastOverObj.bowlerName)}):{' '}
+                      {lastOverObj.runs} रन, {lastOverObj.wickets}W
+                    </span>
+                  )}
                 </div>
               </div>
             </div>
@@ -446,9 +836,9 @@ export const BroadcastOverlayCanvas: React.FC<{
 
         {/* Automatic Rotating Sponsor Ad Strip — Hides when showSponsorTicker is OFF */}
         {state.showSponsorTicker && activeSponsor && (
-          <div className="w-full rounded-xl bg-amber-400 text-slate-950 px-3 sm:px-4 py-1.5 border-2 border-red-600 shadow-lg flex flex-wrap items-center justify-between gap-2 text-[11px] sm:text-xs font-black">
+          <div className="w-full rounded-xl bg-amber-400 text-slate-950 px-2.5 sm:px-3.5 py-1 border-2 border-red-600 shadow-lg flex flex-wrap items-center justify-between gap-1.5 text-[10px] sm:text-xs font-black">
             <div className="flex items-center gap-1.5 min-w-0 flex-1">
-              <span className="bg-red-600 text-white px-2 py-0.5 rounded text-[10px] uppercase shrink-0">
+              <span className="bg-red-600 text-white px-1.5 py-0.5 rounded text-[9px] uppercase shrink-0">
                 विज्ञापन
               </span>
               <span className="truncate">
@@ -456,7 +846,7 @@ export const BroadcastOverlayCanvas: React.FC<{
                 <span className="text-red-800">{activeSponsor.tagline}</span>
               </span>
             </div>
-            <div className="flex items-center gap-2 shrink-0 bg-slate-950 text-amber-300 px-2.5 py-0.5 rounded-lg text-[10px] sm:text-[11px]">
+            <div className="flex items-center gap-1.5 shrink-0 bg-slate-950 text-amber-300 px-2 py-0.5 rounded-lg text-[9px] sm:text-[10px]">
               <span>प्रो०: {activeSponsor.ownerName}</span>
               <span>•</span>
               <span>📞 {activeSponsor.mobile}</span>
@@ -471,7 +861,6 @@ export const BroadcastOverlayCanvas: React.FC<{
 export const FBLiveBroadcastStudioView: React.FC<
   FBLiveBroadcastStudioViewProps
 > = ({
-  lang,
   activeProfile,
   teams,
   sponsors,
@@ -486,12 +875,46 @@ export const FBLiveBroadcastStudioView: React.FC<
   const [syncConnected, setSyncConnected] = useState<boolean>(false);
   const [toast, setToast] = useState<string | null>(null);
   const [fullscreenMonitor, setFullscreenMonitor] = useState<boolean>(false);
-  const [needsNextBatsman, setNeedsNextBatsman] = useState<boolean>(false);
+  const [laptopFullControl, setLaptopFullControl] = useState<boolean>(false);
 
-  // Build initial default state
+  // Automatic Wicket -> Next Batsman & Fielding Credit prompt
+  const [needsNextBatsman, setNeedsNextBatsman] = useState<boolean>(false);
+  const [customNextBatsman, setCustomNextBatsman] = useState<string>('');
+  const [outDismissalType, setOutDismissalType] = useState<
+    'Catch' | 'Keeping' | 'RunOut' | 'Bowled'
+  >('Catch');
+  const [outFielderCredited, setOutFielderCredited] = useState<string>('');
+
+  // Automatic Over Complete -> Next Bowler prompt
+  const [needsNextBowler, setNeedsNextBowler] = useState<boolean>(false);
+  const [customNextBowler, setCustomNextBowler] = useState<string>('');
+
+  // Quick Fielding / Catch / Keeping Credit selector
+  const [selectedFielderForCredit, setSelectedFielderForCredit] =
+    useState<string>('');
+
+  // Saved 8-Team Tournament Series Matches in localStorage
+  const [seriesMatches, setSeriesMatches] = useState<
+    SavedMatchSummaryForSeries[]
+  >(() => {
+    try {
+      const raw = localStorage.getItem(SERIES_STORAGE_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  // Build initial default state with rich batsman, bowler, fielding, and overHistory records
   const [liveState, setLiveState] = useState<LiveBroadcastRoomState>(() => {
     const teamA = teams[0];
     const teamB = teams[1];
+    const cleanA = cleanBroadcastName(teamA?.teamName) || 'जाले रॉयल इलेवन';
+    const cleanB = cleanBroadcastName(teamB?.teamName) || 'दरभंगा टाइगर्स';
+    const striker = teamA?.players[0] || '1. मिर्ज़ा सैफ बेग (कप्तान)';
+    const nonStriker = teamA?.players[1] || '2. मो० अरमान खान (उपकप्तान)';
+    const bowler = teamB?.players[0] || '1. अमित कुमार झा (कप्तान)';
+
     return {
       roomId: (initialRoomId || 'JALE-2026').toUpperCase(),
       tournamentName: activeProfile.tournamentName,
@@ -499,29 +922,68 @@ export const FBLiveBroadcastStudioView: React.FC<
       venue: activeProfile.venue,
       matchStage: 'QUARTER FINAL #1',
       battingTeamId: teamA?.id || 'team-1',
-      battingTeamName:
-        teamA?.teamName.replace(/^\d+\.\s*/, '') || 'जाले रॉयल इलेवन',
+      battingTeamName: cleanA,
       bowlingTeamId: teamB?.id || 'team-2',
-      bowlingTeamName:
-        teamB?.teamName.replace(/^\d+\.\s*/, '') || 'दरभंगा टाइगर्स',
-      runs: 148,
-      wickets: 3,
-      overs: 11,
-      balls: 4,
+      bowlingTeamName: cleanB,
+      runs: 0,
+      wickets: 0,
+      overs: 0,
+      balls: 0,
       totalMatchOvers: 16,
-      targetRuns: 195,
+      targetRuns: 0,
       tossOrStatusNote: 'टॉस जीतकर पहले बल्लेबाजी',
-      strikerName: teamA?.players[0] || 'मिर्ज़ा सैफ बेग',
-      strikerRuns: 64,
-      strikerBalls: 26,
-      nonStrikerName: teamA?.players[1] || 'मो० अरमान खान',
-      nonStrikerRuns: 32,
-      nonStrikerBalls: 18,
-      bowlerName: teamB?.players[0] || 'राहुल कुमार सिंह',
-      bowlerWickets: 2,
-      bowlerRuns: 28,
-      bowlerOvers: '3.4',
-      thisOverBalls: ['1', '4', '0', '6'],
+      strikerName: striker,
+      strikerRuns: 0,
+      strikerBalls: 0,
+      strikerFours: 0,
+      strikerSixes: 0,
+      nonStrikerName: nonStriker,
+      nonStrikerRuns: 0,
+      nonStrikerBalls: 0,
+      nonStrikerFours: 0,
+      nonStrikerSixes: 0,
+      bowlerName: bowler,
+      bowlerWickets: 0,
+      bowlerRuns: 0,
+      bowlerOvers: '0.0',
+      bowlerBalls: 0,
+      thisOverBalls: [],
+      overHistory: [],
+      batsmanRecords: {
+        [striker]: {
+          name: striker,
+          team: cleanA,
+          runs: 0,
+          balls: 0,
+          fours: 0,
+          sixes: 0,
+          isOut: false,
+          dismissalText: 'Not Out',
+        },
+        [nonStriker]: {
+          name: nonStriker,
+          team: cleanA,
+          runs: 0,
+          balls: 0,
+          fours: 0,
+          sixes: 0,
+          isOut: false,
+          dismissalText: 'Not Out',
+        },
+      },
+      bowlerRecords: {
+        [bowler]: {
+          name: bowler,
+          team: cleanB,
+          ballsBowled: 0,
+          runsConceded: 0,
+          wickets: 0,
+          dots: 0,
+          foursConceded: 0,
+          sixesConceded: 0,
+        },
+      },
+      fieldingRecords: {},
       screenMode: 'score-ticker',
       celebration: 'none',
       celebrationText: '',
@@ -565,7 +1027,7 @@ export const FBLiveBroadcastStudioView: React.FC<
 
   const triggerToast = (msg: string) => {
     setToast(msg);
-    setTimeout(() => setToast(null), 2400);
+    setTimeout(() => setToast(null), 2600);
   };
 
   // Push state to Server + BroadcastChannel (and optionally record in undoStack)
@@ -619,6 +1081,7 @@ export const FBLiveBroadcastStudioView: React.FC<
     const previousState = undoStack[undoStack.length - 1];
     setUndoStack((prev) => prev.slice(0, -1));
     setNeedsNextBatsman(false);
+    setNeedsNextBowler(false);
     pushLiveState(
       {
         ...previousState,
@@ -773,7 +1236,9 @@ export const FBLiveBroadcastStudioView: React.FC<
     }));
   }, [sponsors, overlayOnly]);
 
-  // Ball-by-Ball Scoring Handler (Automatically saves to Undo Stack!)
+  // =====================================================================
+  // BALL-BY-BALL SCORING HANDLER (WITH FULL MATCH RECORD & OVER HISTORY)
+  // =====================================================================
   const handleBallScore = (
     runsAdded: number,
     options?: {
@@ -788,30 +1253,140 @@ export const FBLiveBroadcastStudioView: React.FC<
 
     let nextBalls = isExtra ? liveState.balls : liveState.balls + 1;
     let nextOvers = liveState.overs;
-    let nextThisOver = [...liveState.thisOverBalls];
-    let overCompleted = false;
-
     const ballBadge = isWicket
       ? 'W'
       : isExtra
       ? options?.extraLabel || 'WD'
       : String(runsAdded);
 
+    const fullOverBalls = [...liveState.thisOverBalls, ballBadge];
+    let nextThisOver = fullOverBalls.slice(-6);
+    let overCompleted = false;
+    const nextOverHistory: OverSummaryRecord[] = [
+      ...(liveState.overHistory || []),
+    ];
+
     if (nextBalls >= 6) {
       nextOvers += 1;
       nextBalls = 0;
-      nextThisOver = [];
       overCompleted = true;
-    } else {
-      nextThisOver = [...nextThisOver.slice(-5), ballBadge];
+
+      // Calculate runs and wickets in this completed over
+      const overRuns = fullOverBalls.reduce((sum, b) => {
+        if (b === 'W') return sum;
+        if (b === 'WD' || b === 'NB') return sum + 1;
+        const parsed = parseInt(b, 10);
+        return sum + (isNaN(parsed) ? 0 : parsed);
+      }, 0);
+      const overWickets = fullOverBalls.filter((b) => b === 'W').length;
+
+      nextOverHistory.push({
+        overNumber: nextOvers,
+        bowlerName: liveState.bowlerName,
+        balls: fullOverBalls,
+        runs: overRuns,
+        wickets: overWickets,
+      });
+
+      nextThisOver = [];
     }
 
+    // Update Batsman Record
+    const currentBatsmanRecords: Record<string, BatsmanLiveStat> = {
+      ...(liveState.batsmanRecords || {}),
+    };
+    const prevStrikerRec = currentBatsmanRecords[liveState.strikerName] || {
+      name: liveState.strikerName,
+      team: liveState.battingTeamName,
+      runs: liveState.strikerRuns,
+      balls: liveState.strikerBalls,
+      fours: liveState.strikerFours || 0,
+      sixes: liveState.strikerSixes || 0,
+      isOut: false,
+      dismissalText: 'Not Out',
+    };
+
     const nextStrikerRuns = isExtra
-      ? liveState.strikerRuns
-      : liveState.strikerRuns + runsAdded;
+      ? prevStrikerRec.runs
+      : prevStrikerRec.runs + runsAdded;
     const nextStrikerBalls = isExtra
-      ? liveState.strikerBalls
-      : liveState.strikerBalls + 1;
+      ? prevStrikerRec.balls
+      : prevStrikerRec.balls + 1;
+    const nextStrikerFours =
+      !isExtra && runsAdded === 4
+        ? prevStrikerRec.fours + 1
+        : prevStrikerRec.fours;
+    const nextStrikerSixes =
+      !isExtra && runsAdded === 6
+        ? prevStrikerRec.sixes + 1
+        : prevStrikerRec.sixes;
+
+    currentBatsmanRecords[liveState.strikerName] = {
+      ...prevStrikerRec,
+      runs: nextStrikerRuns,
+      balls: nextStrikerBalls,
+      fours: nextStrikerFours,
+      sixes: nextStrikerSixes,
+      isOut: isWicket ? true : prevStrikerRec.isOut,
+      dismissalText: isWicket
+        ? `b ${cleanBroadcastName(liveState.bowlerName)}`
+        : prevStrikerRec.dismissalText,
+    };
+
+    // Ensure non-striker also exists in batsmanRecords
+    if (!currentBatsmanRecords[liveState.nonStrikerName]) {
+      currentBatsmanRecords[liveState.nonStrikerName] = {
+        name: liveState.nonStrikerName,
+        team: liveState.battingTeamName,
+        runs: liveState.nonStrikerRuns,
+        balls: liveState.nonStrikerBalls,
+        fours: liveState.nonStrikerFours || 0,
+        sixes: liveState.nonStrikerSixes || 0,
+        isOut: false,
+        dismissalText: 'Not Out',
+      };
+    }
+
+    // Update Bowler Record
+    const currentBowlerRecords: Record<string, BowlerLiveStat> = {
+      ...(liveState.bowlerRecords || {}),
+    };
+    const prevBowlerRec = currentBowlerRecords[liveState.bowlerName] || {
+      name: liveState.bowlerName,
+      team: liveState.bowlingTeamName,
+      ballsBowled: liveState.bowlerBalls || 0,
+      runsConceded: liveState.bowlerRuns,
+      wickets: liveState.bowlerWickets,
+      dots: 0,
+      foursConceded: 0,
+      sixesConceded: 0,
+    };
+
+    const nextBowlerBalls = isExtra
+      ? prevBowlerRec.ballsBowled
+      : prevBowlerRec.ballsBowled + 1;
+    const nextBowlerRuns = Math.max(0, prevBowlerRec.runsConceded + runsAdded);
+    const nextBowlerWickets = isWicket
+      ? prevBowlerRec.wickets + 1
+      : prevBowlerRec.wickets;
+    const nextBowlerDots =
+      !isExtra && runsAdded === 0 ? prevBowlerRec.dots + 1 : prevBowlerRec.dots;
+
+    currentBowlerRecords[liveState.bowlerName] = {
+      ...prevBowlerRec,
+      ballsBowled: nextBowlerBalls,
+      runsConceded: nextBowlerRuns,
+      wickets: nextBowlerWickets,
+      dots: nextBowlerDots,
+      foursConceded:
+        !isExtra && runsAdded === 4
+          ? prevBowlerRec.foursConceded + 1
+          : prevBowlerRec.foursConceded,
+      sixesConceded:
+        !isExtra && runsAdded === 6
+          ? prevBowlerRec.sixesConceded + 1
+          : prevBowlerRec.sixesConceded,
+    };
 
     // Swap strike on odd runs (1, 3), or at end of over (flipped if odd runs on last ball)
     const oddRunSwap = !isExtra && (runsAdded === 1 || runsAdded === 3);
@@ -829,15 +1404,22 @@ export const FBLiveBroadcastStudioView: React.FC<
 
     const celebrationText =
       celebrationType === 'SIX'
-        ? `${liveState.strikerName} — शानदार छक्का (6 RUNS)!`
+        ? `${cleanBroadcastName(liveState.strikerName)} — शानदार छक्का (6 RUNS)!`
         : celebrationType === 'FOUR'
-        ? `${liveState.strikerName} — दर्शनीय चौका (4 RUNS)!`
+        ? `${cleanBroadcastName(liveState.strikerName)} — दर्शनीय चौका (4 RUNS)!`
         : celebrationType === 'WICKET'
-        ? `OUT! विकेट गिरा (${liveState.strikerName})`
+        ? `OUT! विकेट गिरा (${cleanBroadcastName(liveState.strikerName)})`
         : '';
 
     if (isWicket) {
       setNeedsNextBatsman(true);
+      setOutFielderCredited('');
+      setCustomNextBatsman('');
+    }
+
+    if (overCompleted) {
+      setNeedsNextBowler(true);
+      setCustomNextBowler('');
     }
 
     const nextState: LiveBroadcastRoomState = {
@@ -857,6 +1439,12 @@ export const FBLiveBroadcastStudioView: React.FC<
       strikerBalls: shouldSwapStrike
         ? liveState.nonStrikerBalls
         : nextStrikerBalls,
+      strikerFours: shouldSwapStrike
+        ? liveState.nonStrikerFours
+        : nextStrikerFours,
+      strikerSixes: shouldSwapStrike
+        ? liveState.nonStrikerSixes
+        : nextStrikerSixes,
       nonStrikerName: shouldSwapStrike
         ? liveState.strikerName
         : liveState.nonStrikerName,
@@ -866,17 +1454,175 @@ export const FBLiveBroadcastStudioView: React.FC<
       nonStrikerBalls: shouldSwapStrike
         ? nextStrikerBalls
         : liveState.nonStrikerBalls,
-      bowlerRuns: Math.max(0, liveState.bowlerRuns + runsAdded),
-      bowlerWickets: isWicket
-        ? liveState.bowlerWickets + 1
-        : liveState.bowlerWickets,
+      nonStrikerFours: shouldSwapStrike
+        ? nextStrikerFours
+        : liveState.nonStrikerFours,
+      nonStrikerSixes: shouldSwapStrike
+        ? nextStrikerSixes
+        : liveState.nonStrikerSixes,
+      bowlerRuns: nextBowlerRuns,
+      bowlerWickets: nextBowlerWickets,
+      bowlerBalls: nextBowlerBalls,
+      bowlerOvers: formatBallsToOvers(nextBowlerBalls),
       thisOverBalls: nextThisOver,
+      overHistory: nextOverHistory,
+      batsmanRecords: currentBatsmanRecords,
+      bowlerRecords: currentBowlerRecords,
       celebration: celebrationType,
       celebrationText,
       celebrationTimestamp: celebrationType !== 'none' ? Date.now() : 0,
     };
 
     pushLiveState(nextState, true);
+  };
+
+  // Switch Batsman (either from 15-player list or custom typed name)
+  const handleConfirmNextBatsman = (playerName: string) => {
+    const cleanInput = playerName.trim();
+    if (!cleanInput) return;
+
+    const currentBatsmanRecords: Record<string, BatsmanLiveStat> = {
+      ...(liveState.batsmanRecords || {}),
+    };
+    const existing = currentBatsmanRecords[cleanInput] || {
+      name: cleanInput,
+      team: liveState.battingTeamName,
+      runs: 0,
+      balls: 0,
+      fours: 0,
+      sixes: 0,
+      isOut: false,
+      dismissalText: 'Not Out',
+    };
+    currentBatsmanRecords[cleanInput] = {
+      ...existing,
+      isOut: false,
+      dismissalText: 'Not Out',
+    };
+
+    // If striker was the one who got out (or swapped on over end), put new batsman on the out slot
+    const strikerRec = currentBatsmanRecords[liveState.strikerName];
+    const replaceNonStriker =
+      strikerRec && !strikerRec.isOut && currentBatsmanRecords[liveState.nonStrikerName]?.isOut;
+
+    if (replaceNonStriker) {
+      pushLiveState(
+        {
+          ...liveState,
+          nonStrikerName: cleanInput,
+          nonStrikerRuns: existing.runs,
+          nonStrikerBalls: existing.balls,
+          nonStrikerFours: existing.fours,
+          nonStrikerSixes: existing.sixes,
+          batsmanRecords: currentBatsmanRecords,
+        },
+        true
+      );
+    } else {
+      pushLiveState(
+        {
+          ...liveState,
+          strikerName: cleanInput,
+          strikerRuns: existing.runs,
+          strikerBalls: existing.balls,
+          strikerFours: existing.fours,
+          strikerSixes: existing.sixes,
+          batsmanRecords: currentBatsmanRecords,
+        },
+        true
+      );
+    }
+
+    setNeedsNextBatsman(false);
+    setCustomNextBatsman('');
+    triggerToast(`✓ नया बल्लेबाज "${cleanBroadcastName(cleanInput)}" क्रीज पर!`);
+  };
+
+  // Switch Bowler (either on Over completion or manually, restoring their previous match spell!)
+  const handleSelectBowlerWithRecord = (bowlerName: string) => {
+    const cleanInput = bowlerName.trim();
+    if (!cleanInput) return;
+
+    const currentBowlerRecords: Record<string, BowlerLiveStat> = {
+      ...(liveState.bowlerRecords || {}),
+    };
+    const existing = currentBowlerRecords[cleanInput] || {
+      name: cleanInput,
+      team: liveState.bowlingTeamName,
+      ballsBowled: 0,
+      runsConceded: 0,
+      wickets: 0,
+      dots: 0,
+      foursConceded: 0,
+      sixesConceded: 0,
+    };
+    currentBowlerRecords[cleanInput] = existing;
+
+    pushLiveState(
+      {
+        ...liveState,
+        bowlerName: cleanInput,
+        bowlerRuns: existing.runsConceded,
+        bowlerWickets: existing.wickets,
+        bowlerBalls: existing.ballsBowled,
+        bowlerOvers: formatBallsToOvers(existing.ballsBowled),
+        bowlerRecords: currentBowlerRecords,
+      },
+      true
+    );
+
+    setNeedsNextBowler(false);
+    setCustomNextBowler('');
+    triggerToast(
+      `⚾ नया गेंदबाज "${cleanBroadcastName(cleanInput)}" (${formatBallsToOvers(
+        existing.ballsBowled
+      )} Ov, ${existing.runsConceded}R, ${existing.wickets}W) तैयार!`
+    );
+  };
+
+  // Record Fielding / Catch / Keeping Credit for Best Catch, Best Keeper, Best Fielder Awards
+  const handleAddFieldingCredit = (
+    playerName: string,
+    type: 'Catch' | 'Keeping' | 'RunOut' | 'Save'
+  ) => {
+    if (!playerName.trim()) return;
+    const nextFielding: Record<string, FieldingLiveStat> = {
+      ...(liveState.fieldingRecords || {}),
+    };
+    const prev = nextFielding[playerName] || {
+      name: playerName,
+      team: liveState.bowlingTeamName,
+      catches: 0,
+      keepings: 0,
+      runOuts: 0,
+      saves: 0,
+    };
+
+    nextFielding[playerName] = {
+      ...prev,
+      catches: type === 'Catch' ? prev.catches + 1 : prev.catches,
+      keepings: type === 'Keeping' ? prev.keepings + 1 : prev.keepings,
+      runOuts: type === 'RunOut' ? prev.runOuts + 1 : prev.runOuts,
+      saves: type === 'Save' ? prev.saves + 1 : prev.saves,
+    };
+
+    pushLiveState(
+      {
+        ...liveState,
+        fieldingRecords: nextFielding,
+      },
+      true
+    );
+    setOutFielderCredited(playerName);
+    const labelMap = {
+      Catch: '🙌 +1 कैच (Catch)',
+      Keeping: '🧤 +1 कीपिंग / स्टंपिंग',
+      RunOut: '🎯 +1 रन-आउट',
+      Save: '⚡ +1 शानदार फील्डिंग सेव',
+    };
+    triggerToast(
+      `✓ ${cleanBroadcastName(playerName)} के नाम ${labelMap[type]} जुड़ गया!`
+    );
   };
 
   // Quick Manual +/- Mistake Fixer Handler
@@ -915,19 +1661,45 @@ export const FBLiveBroadcastStudioView: React.FC<
   const handleSelectTeamA = (teamId: string) => {
     const found = teams.find((t) => t.id === teamId);
     if (!found) return;
-    const cleanName = found.teamName.replace(/^\d+\.\s*/, '');
+    const cleanName = cleanBroadcastName(found.teamName);
+    const p1 = found.players[0] || 'बल्लेबाज 1';
+    const p2 = found.players[1] || 'बल्लेबाज 2';
+    const nextBatsmen: Record<string, BatsmanLiveStat> = {
+      ...(liveState.batsmanRecords || {}),
+      [p1]: liveState.batsmanRecords?.[p1] || {
+        name: p1,
+        team: cleanName,
+        runs: 0,
+        balls: 0,
+        fours: 0,
+        sixes: 0,
+        isOut: false,
+        dismissalText: 'Not Out',
+      },
+      [p2]: liveState.batsmanRecords?.[p2] || {
+        name: p2,
+        team: cleanName,
+        runs: 0,
+        balls: 0,
+        fours: 0,
+        sixes: 0,
+        isOut: false,
+        dismissalText: 'Not Out',
+      },
+    };
     pushLiveState(
       {
         ...liveState,
         battingTeamId: found.id,
         battingTeamName: cleanName,
         teamAPlayers: found.players,
-        strikerName: found.players[0] || 'बल्लेबाज 1',
-        strikerRuns: 0,
-        strikerBalls: 0,
-        nonStrikerName: found.players[1] || 'बल्लेबाज 2',
-        nonStrikerRuns: 0,
-        nonStrikerBalls: 0,
+        strikerName: p1,
+        strikerRuns: nextBatsmen[p1].runs,
+        strikerBalls: nextBatsmen[p1].balls,
+        nonStrikerName: p2,
+        nonStrikerRuns: nextBatsmen[p2].runs,
+        nonStrikerBalls: nextBatsmen[p2].balls,
+        batsmanRecords: nextBatsmen,
       },
       true
     );
@@ -936,20 +1708,142 @@ export const FBLiveBroadcastStudioView: React.FC<
   const handleSelectTeamB = (teamId: string) => {
     const found = teams.find((t) => t.id === teamId);
     if (!found) return;
-    const cleanName = found.teamName.replace(/^\d+\.\s*/, '');
+    const cleanName = cleanBroadcastName(found.teamName);
+    const b1 = found.players[0] || 'गेंदबाज 1';
+    const nextBowlers: Record<string, BowlerLiveStat> = {
+      ...(liveState.bowlerRecords || {}),
+      [b1]: liveState.bowlerRecords?.[b1] || {
+        name: b1,
+        team: cleanName,
+        ballsBowled: 0,
+        runsConceded: 0,
+        wickets: 0,
+        dots: 0,
+        foursConceded: 0,
+        sixesConceded: 0,
+      },
+    };
     pushLiveState(
       {
         ...liveState,
         bowlingTeamId: found.id,
         bowlingTeamName: cleanName,
         teamBPlayers: found.players,
-        bowlerName: found.players[0] || 'गेंदबाज 1',
-        bowlerRuns: 0,
-        bowlerWickets: 0,
+        bowlerName: b1,
+        bowlerRuns: nextBowlers[b1].runsConceded,
+        bowlerWickets: nextBowlers[b1].wickets,
+        bowlerBalls: nextBowlers[b1].ballsBowled,
+        bowlerOvers: formatBallsToOvers(nextBowlers[b1].ballsBowled),
+        bowlerRecords: nextBowlers,
       },
       true
     );
   };
+
+  // Save current match into 8-Team Tournament Series History for Man of the Series
+  const handleSaveMatchToSeries = () => {
+    const entry: SavedMatchSummaryForSeries = {
+      id: `match-${Date.now()}`,
+      matchLabel: `${liveState.battingTeamName} vs ${liveState.bowlingTeamName}`,
+      date: new Date().toLocaleDateString('hi-IN'),
+      battingTeamName: liveState.battingTeamName,
+      bowlingTeamName: liveState.bowlingTeamName,
+      runs: liveState.runs,
+      wickets: liveState.wickets,
+      overs: `${liveState.overs}.${liveState.balls}`,
+      batsmanRecords: liveState.batsmanRecords || {},
+      bowlerRecords: liveState.bowlerRecords || {},
+      fieldingRecords: liveState.fieldingRecords || {},
+    };
+    const updated = [entry, ...seriesMatches];
+    setSeriesMatches(updated);
+    try {
+      localStorage.setItem(SERIES_STORAGE_KEY, JSON.stringify(updated));
+    } catch {
+      // ignore
+    }
+    triggerToast(
+      '🏆 यह मैच 8-टीम टूर्नामेंट सीरीज़ रिकॉर्ड में जुड़ गया! (Man of the Series अपडेटेड)'
+    );
+  };
+
+  // Compute Current Match Automatic Awards
+  const currentMatchAwards = useMemo(
+    () =>
+      computeAutoAwards(
+        liveState.batsmanRecords,
+        liveState.bowlerRecords,
+        liveState.fieldingRecords
+      ),
+    [
+      liveState.batsmanRecords,
+      liveState.bowlerRecords,
+      liveState.fieldingRecords,
+    ]
+  );
+
+  // Compute Cumulative 8-Team Series Awards (All Saved Matches + Current Match)
+  const seriesCumulativeAwards = useMemo(() => {
+    const mergedBat: Record<string, BatsmanLiveStat> = {};
+    const mergedBowl: Record<string, BowlerLiveStat> = {};
+    const mergedFld: Record<string, FieldingLiveStat> = {};
+
+    const allSources = [
+      ...seriesMatches,
+      {
+        batsmanRecords: liveState.batsmanRecords || {},
+        bowlerRecords: liveState.bowlerRecords || {},
+        fieldingRecords: liveState.fieldingRecords || {},
+      },
+    ];
+
+    allSources.forEach((src) => {
+      Object.values(src.batsmanRecords || {}).forEach((b) => {
+        const prev = mergedBat[b.name];
+        mergedBat[b.name] = {
+          name: b.name,
+          team: b.team,
+          runs: (prev?.runs || 0) + b.runs,
+          balls: (prev?.balls || 0) + b.balls,
+          fours: (prev?.fours || 0) + b.fours,
+          sixes: (prev?.sixes || 0) + b.sixes,
+          isOut: b.isOut,
+          dismissalText: b.dismissalText,
+        };
+      });
+      Object.values(src.bowlerRecords || {}).forEach((bw) => {
+        const prev = mergedBowl[bw.name];
+        mergedBowl[bw.name] = {
+          name: bw.name,
+          team: bw.team,
+          ballsBowled: (prev?.ballsBowled || 0) + bw.ballsBowled,
+          runsConceded: (prev?.runsConceded || 0) + bw.runsConceded,
+          wickets: (prev?.wickets || 0) + bw.wickets,
+          dots: (prev?.dots || 0) + bw.dots,
+          foursConceded: (prev?.foursConceded || 0) + bw.foursConceded,
+          sixesConceded: (prev?.sixesConceded || 0) + bw.sixesConceded,
+        };
+      });
+      Object.values(src.fieldingRecords || {}).forEach((fl) => {
+        const prev = mergedFld[fl.name];
+        mergedFld[fl.name] = {
+          name: fl.name,
+          team: fl.team,
+          catches: (prev?.catches || 0) + fl.catches,
+          keepings: (prev?.keepings || 0) + fl.keepings,
+          runOuts: (prev?.runOuts || 0) + fl.runOuts,
+          saves: (prev?.saves || 0) + fl.saves,
+        };
+      });
+    });
+
+    return computeAutoAwards(mergedBat, mergedBowl, mergedFld);
+  }, [
+    seriesMatches,
+    liveState.batsmanRecords,
+    liveState.bowlerRecords,
+    liveState.fieldingRecords,
+  ]);
 
   const overlayUrl = useMemo(() => {
     const base = getPublicShareOrigin();
@@ -961,7 +1855,13 @@ export const FBLiveBroadcastStudioView: React.FC<
   }
 
   return (
-    <div className="max-w-7xl mx-auto p-3 sm:p-5 space-y-5 overflow-x-hidden">
+    <div
+      className={`${
+        laptopFullControl
+          ? 'fixed inset-0 z-50 bg-slate-950 overflow-y-auto p-3 sm:p-5'
+          : 'w-full max-w-[1600px] mx-auto p-3 sm:p-5'
+      } space-y-4 overflow-x-hidden`}
+    >
       {toast && (
         <div className="fixed top-16 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-emerald-600 text-white px-4 py-2.5 rounded-xl shadow-2xl border border-emerald-300 text-xs font-extrabold">
           <Check className="w-4 h-4 shrink-0 stroke-[3]" />
@@ -969,43 +1869,43 @@ export const FBLiveBroadcastStudioView: React.FC<
         </div>
       )}
 
-      {/* Fullscreen TV Overlay Monitor Modal */}
+      {/* Fullscreen TV Overlay Monitor Modal (Zero Bottom Clipping!) */}
       {fullscreenMonitor && (
-        <div className="fixed inset-0 z-50 bg-slate-950 flex flex-col">
-          <div className="flex items-center justify-between px-4 py-2 bg-black/80 text-white border-b border-white/10">
+        <div className="fixed inset-0 z-50 bg-slate-950 flex flex-col overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-2 bg-black/90 text-white border-b border-white/10 shrink-0">
             <span className="text-xs font-black text-amber-400">
               🔴 FULL-SCREEN LIVE OVERLAY PREVIEW (ROOM: {roomId})
             </span>
             <button
               onClick={() => setFullscreenMonitor(false)}
-              className="flex items-center gap-1 px-3 py-1 rounded-lg bg-red-600 text-white text-xs font-black cursor-pointer"
+              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-red-600 text-white text-xs font-black cursor-pointer shrink-0"
             >
               <Minimize2 className="w-3.5 h-3.5" />
               <span>वापस कंट्रोलर पर जाएं</span>
             </button>
           </div>
-          <div className="flex-1">
+          <div className="flex-1 min-h-0 w-full overflow-hidden">
             <BroadcastOverlayCanvas state={liveState} transparentBg={false} />
           </div>
         </div>
       )}
 
       {/* =====================================================================
-          TOP BAR: SIMPLE ROOM CODE + 1-CLICK OVERLAY LINK COPY
+          TOP BAR: ROOM CODE + PRISM LIVE LINK + LAPTOP FULL-SCREEN CONTROL MODE
       ===================================================================== */}
-      <div className="rounded-2xl bg-[#0B192C] text-white p-4 border-2 border-amber-500/60 shadow-lg flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+      <div className="rounded-2xl bg-[#0B192C] text-white p-3.5 sm:p-4 border-2 border-amber-500/60 shadow-lg flex flex-col lg:flex-row lg:items-center justify-between gap-3">
         <div className="space-y-0.5">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-red-600 text-white text-[10px] font-black uppercase">
               <Radio className="w-3 h-3 animate-pulse" />
-              2-Mobile Live Control
+              Mobile + Laptop Live Studio
             </span>
             <span className="text-xs font-bold text-emerald-400">
-              {syncConnected ? '● दोनों मोबाइल कनेक्टेड हैं' : '● लाइव सिंक चालू है'}
+              {syncConnected ? '● दोनों डिवाइस कनेक्टेड हैं' : '● लाइव सिंक चालू है'}
             </span>
           </div>
-          <h1 className="text-base sm:text-xl font-black text-amber-400">
-            🔴 फेसबुक लाइव रिमोट स्कोरर, खिलाड़ी सूची & ऑटो-विज्ञापन कंट्रोलर
+          <h1 className="text-sm sm:text-xl font-black text-amber-400">
+            🔴 फेसबुक लाइव रिमोट स्कोरर, ऑटो-अवार्ड्स & विज्ञापन कंट्रोल रूम
           </h1>
         </div>
 
@@ -1028,7 +1928,7 @@ export const FBLiveBroadcastStudioView: React.FC<
                 '✓ Live Overlay लिंक कॉपी हो गया! कैमरा फोन के PRISM Live में पेस्ट करें।'
               );
             }}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs cursor-pointer shadow-sm"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs cursor-pointer shadow-sm"
           >
             <Copy className="w-3.5 h-3.5" />
             <span>कैमरा फोन (PRISM Live) लिंक कॉपी करें</span>
@@ -1040,7 +1940,37 @@ export const FBLiveBroadcastStudioView: React.FC<
             className="flex items-center gap-1 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs cursor-pointer border border-slate-700"
           >
             <Eye className="w-3.5 h-3.5" />
-            <span>फुल स्क्रीन देखें</span>
+            <span>टीवी प्रिव्यू फुल स्क्रीन</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              const nextMode = !laptopFullControl;
+              setLaptopFullControl(nextMode);
+              if (nextMode && !document.fullscreenElement) {
+                document.documentElement.requestFullscreen?.().catch(() => {});
+              } else if (!nextMode && document.fullscreenElement) {
+                document.exitFullscreen?.().catch(() => {});
+              }
+            }}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl font-black text-xs cursor-pointer border transition-colors ${
+              laptopFullControl
+                ? 'bg-red-600 text-white border-red-400'
+                : 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-400'
+            }`}
+          >
+            {laptopFullControl ? (
+              <>
+                <Minimize2 className="w-3.5 h-3.5" />
+                <span>लैपटॉप फुल-स्क्रीन बंद करें</span>
+              </>
+            ) : (
+              <>
+                <Maximize2 className="w-3.5 h-3.5" />
+                <span>🖥️ लैपटॉप / बड़ी स्क्रीन फुल कंट्रोल</span>
+              </>
+            )}
           </button>
         </div>
       </div>
@@ -1061,7 +1991,7 @@ export const FBLiveBroadcastStudioView: React.FC<
                 : '✓ लाइव स्कोरबोर्ड छुपा दिया गया (OFF) — स्क्रीन अब बिल्कुल साफ है!'
             );
           }}
-          className={`p-3.5 rounded-2xl border-2 flex items-center justify-between transition-all cursor-pointer ${
+          className={`p-3 rounded-2xl border-2 flex items-center justify-between transition-all cursor-pointer ${
             liveState.showScoreboard !== false
               ? 'bg-emerald-600 text-white border-emerald-300 shadow-md'
               : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-800'
@@ -1078,7 +2008,7 @@ export const FBLiveBroadcastStudioView: React.FC<
             </div>
           </div>
           <div
-            className={`w-14 h-7 rounded-full p-1 transition-colors flex items-center ${
+            className={`w-14 h-7 rounded-full p-1 transition-colors flex items-center shrink-0 ${
               liveState.showScoreboard !== false
                 ? 'bg-slate-950/40 justify-end'
                 : 'bg-slate-300 dark:bg-slate-700 justify-start'
@@ -1100,7 +2030,7 @@ export const FBLiveBroadcastStudioView: React.FC<
                 : '✓ दुकान विज्ञापन पट्टी बंद (OFF) कर दी गई!'
             );
           }}
-          className={`p-3.5 rounded-2xl border-2 flex items-center justify-between transition-all cursor-pointer ${
+          className={`p-3 rounded-2xl border-2 flex items-center justify-between transition-all cursor-pointer ${
             liveState.showSponsorTicker
               ? 'bg-amber-500 text-slate-950 border-amber-300 shadow-md'
               : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-800'
@@ -1117,7 +2047,7 @@ export const FBLiveBroadcastStudioView: React.FC<
             </div>
           </div>
           <div
-            className={`w-14 h-7 rounded-full p-1 transition-colors flex items-center ${
+            className={`w-14 h-7 rounded-full p-1 transition-colors flex items-center shrink-0 ${
               liveState.showSponsorTicker
                 ? 'bg-slate-950/40 justify-end'
                 : 'bg-slate-300 dark:bg-slate-700 justify-start'
@@ -1139,7 +2069,7 @@ export const FBLiveBroadcastStudioView: React.FC<
                 : '✓ ऑटोमैटिक विज्ञापन बदलना बंद किया गया।'
             );
           }}
-          className={`p-3.5 rounded-2xl border-2 flex items-center justify-between transition-all cursor-pointer ${
+          className={`p-3 rounded-2xl border-2 flex items-center justify-between transition-all cursor-pointer ${
             liveState.autoRotateAds
               ? 'bg-blue-600 text-white border-blue-300 shadow-md'
               : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-800'
@@ -1156,7 +2086,7 @@ export const FBLiveBroadcastStudioView: React.FC<
             </div>
           </div>
           <div
-            className={`w-14 h-7 rounded-full p-1 transition-colors flex items-center ${
+            className={`w-14 h-7 rounded-full p-1 transition-colors flex items-center shrink-0 ${
               liveState.autoRotateAds
                 ? 'bg-slate-950/40 justify-end'
                 : 'bg-slate-300 dark:bg-slate-700 justify-start'
@@ -1168,11 +2098,12 @@ export const FBLiveBroadcastStudioView: React.FC<
       </div>
 
       {/* =====================================================================
-          MAIN WORKSPACE: SCORING + MISTAKE FIXER (LEFT) & LIVE PREVIEW (RIGHT)
+          MAIN WORKSPACE: WIDESCREEN LAPTOP & MOBILE GRID
       ===================================================================== */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+        {/* LEFT 7 COLUMNS: SCORING PAD + AUTO PLAYER SELECTORS + LIVE MATCH RECORDS + AUTO AWARDS */}
         <div className="lg:col-span-7 space-y-5">
-          {/* CARD A: SUPER-SIMPLE SCORING PAD + MISTAKE FIXER (UNDO & +/-) */}
+          {/* CARD A: SUPER-SIMPLE SCORING PAD + MISTAKE FIXER + AUTO NEXT BATSMAN & NEXT BOWLER */}
           <div className="bg-[#0B192C] text-white rounded-3xl border-2 border-amber-500/60 p-4 sm:p-5 space-y-4 shadow-xl">
             {/* Score Display + BIG UNDO LAST MISTAKE BUTTON */}
             <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-950/90 p-3.5 rounded-2xl border border-white/10">
@@ -1194,64 +2125,252 @@ export const FBLiveBroadcastStudioView: React.FC<
               </div>
 
               {/* BIG MISTAKE UNDO BUTTON */}
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleUndoLastMistake}
-                  disabled={undoStack.length === 0}
-                  className="flex items-center gap-1.5 px-4 py-3 rounded-2xl bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-slate-950 font-black text-xs sm:text-sm cursor-pointer shadow-lg active:scale-95"
-                >
-                  <Undo2 className="w-4 h-4 stroke-[3]" />
-                  <span>गलती सुधारें / पिछली गेंद हटाएं (UNDO)</span>
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={handleUndoLastMistake}
+                disabled={undoStack.length === 0}
+                className="flex items-center gap-1.5 px-4 py-3 rounded-2xl bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-slate-950 font-black text-xs sm:text-sm cursor-pointer shadow-lg active:scale-95"
+              >
+                <Undo2 className="w-4 h-4 stroke-[3]" />
+                <span>गलती सुधारें / पिछली गेंद हटाएं (UNDO)</span>
+              </button>
             </div>
 
-            {/* IF WICKET FELL: AUTOMATIC PROMPT TO PICK NEXT BATSMAN IN 1 TAP */}
+            {/* ==============================================================
+                AUTOMATIC POPUP 1: WHEN WICKET FALLS -> PICK FIELDER/KEEPER + NEXT BATSMAN
+            ============================================================== */}
             {needsNextBatsman && (
-              <div className="p-3.5 rounded-2xl bg-amber-500 text-slate-950 space-y-2 shadow-lg">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-black uppercase">
-                    🎯 विकेट गिरा! अगला नया बल्लेबाज 1-क्लिक में चुनें:
+              <div className="p-3.5 rounded-2xl bg-amber-400 text-slate-950 space-y-3 shadow-xl border-2 border-white">
+                <div className="flex items-center justify-between border-b border-slate-950/15 pb-1.5">
+                  <span className="text-xs sm:text-sm font-black uppercase">
+                    🎯 विकेट गिरा! (1) कैच/कीपिंग चुनें और (2) अगला नया बल्लेबाज चुनें:
                   </span>
                   <button
                     type="button"
                     onClick={() => setNeedsNextBatsman(false)}
-                    className="text-xs font-black underline cursor-pointer"
+                    className="text-xs font-black bg-slate-950 text-white px-2.5 py-0.5 rounded-lg cursor-pointer"
                   >
-                    बंद करें
+                    बंद करें ✕
                   </button>
                 </div>
+
+                {/* Step 1: Optional Dismissal Type + Who took Catch/Stumping (for Best Catch / Best Keeper Awards!) */}
+                <div className="bg-amber-300/70 rounded-xl p-2.5 space-y-2">
+                  <div className="text-[11px] font-black">
+                    1️⃣ आउट कैसे हुआ? (बेस्ट कैच / बेस्ट कीपर / बेस्ट फील्डर अवार्ड के लिए):
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                    {[
+                      { id: 'Catch', label: '🙌 कैच आउट (Catch)' },
+                      { id: 'Keeping', label: '🧤 स्टंप / कीपर (Keeping)' },
+                      { id: 'RunOut', label: '🎯 रन आउट (Fielder)' },
+                      { id: 'Bowled', label: '🎳 बोल्ड / LBW' },
+                    ].map((d) => (
+                      <button
+                        key={d.id}
+                        type="button"
+                        onClick={() =>
+                          setOutDismissalType(
+                            d.id as 'Catch' | 'Keeping' | 'RunOut' | 'Bowled'
+                          )
+                        }
+                        className={`py-1.5 px-2 rounded-lg text-[11px] font-black cursor-pointer ${
+                          outDismissalType === d.id
+                            ? 'bg-red-600 text-white shadow-xs'
+                            : 'bg-white/80 text-slate-900'
+                        }`}
+                      >
+                        {d.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {outDismissalType !== 'Bowled' && (
+                    <div className="space-y-1 pt-1">
+                      <div className="text-[10px] font-black text-slate-900">
+                        किस खिलाड़ी ने{' '}
+                        {outDismissalType === 'Catch'
+                          ? 'कैच पकड़ा'
+                          : outDismissalType === 'Keeping'
+                          ? 'स्टंपिंग / कीपर कैच किया'
+                          : 'रन-आउट किया'}
+                        ? (टैप करें — अवार्ड में +1 जुड़ेगा):
+                      </div>
+                      <div className="flex flex-wrap gap-1">
+                        {liveState.teamBPlayers.map((fielder, fIdx) => (
+                          <button
+                            key={fIdx}
+                            type="button"
+                            onClick={() =>
+                              handleAddFieldingCredit(fielder, outDismissalType)
+                            }
+                            className={`px-2 py-1 rounded-lg text-[10px] font-black cursor-pointer ${
+                              outFielderCredited === fielder
+                                ? 'bg-emerald-700 text-white'
+                                : 'bg-slate-900/90 text-amber-300 hover:bg-slate-800'
+                            }`}
+                          >
+                            {outFielderCredited === fielder ? '✓ ' : '+ '}
+                            {cleanBroadcastName(fielder)}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Step 2: Select Next Batsman in 1 Tap OR Type/Edit Name */}
+                <div className="space-y-1.5">
+                  <div className="text-[11px] font-black">
+                    2️⃣ अगला नया बल्लेबाज चुनें (1-क्लिक में क्रीज पर भेजें):
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {liveState.teamAPlayers
+                      .filter(
+                        (p) =>
+                          p &&
+                          p !== liveState.strikerName &&
+                          p !== liveState.nonStrikerName
+                      )
+                      .map((player, idx) => {
+                        const alreadyOut =
+                          liveState.batsmanRecords?.[player]?.isOut;
+                        return (
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={() => handleConfirmNextBatsman(player)}
+                            className={`px-2.5 py-1.5 rounded-xl text-xs font-extrabold cursor-pointer ${
+                              alreadyOut
+                                ? 'bg-slate-700/60 text-slate-300 line-through'
+                                : 'bg-slate-950 text-white hover:bg-slate-800 shadow-xs'
+                            }`}
+                          >
+                            🏏 {cleanBroadcastName(player)}
+                          </button>
+                        );
+                      })}
+                  </div>
+
+                  {/* Custom / Editable Next Batsman Name Input */}
+                  <div className="flex items-center gap-2 pt-1">
+                    <input
+                      type="text"
+                      value={customNextBatsman}
+                      onChange={(e) => setCustomNextBatsman(e.target.value)}
+                      placeholder="या नए बल्लेबाज का नाम यहाँ लिखें / एडिट करें..."
+                      className="flex-1 px-3 py-1.5 rounded-xl bg-white text-slate-950 text-xs font-bold border border-slate-400"
+                    />
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleConfirmNextBatsman(customNextBatsman)
+                      }
+                      className="px-3 py-1.5 rounded-xl bg-emerald-700 text-white text-xs font-black cursor-pointer shrink-0"
+                    >
+                      ✓ क्रीज पर भेजें
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ==============================================================
+                AUTOMATIC POPUP 2: WHEN OVER COMPLETES (6 BALLS) -> PICK NEXT BOWLER!
+            ============================================================== */}
+            {needsNextBowler && (
+              <div className="p-3.5 rounded-2xl bg-sky-400 text-slate-950 space-y-2.5 shadow-xl border-2 border-white">
+                <div className="flex items-center justify-between border-b border-slate-950/15 pb-1.5">
+                  <span className="text-xs sm:text-sm font-black uppercase">
+                    ⚾ ओवर #{liveState.overs} समाप्त! अगला गेंदबाज (Next Bowler) 1-क्लिक में चुनें:
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setNeedsNextBowler(false)}
+                    className="text-xs font-black bg-slate-950 text-white px-2.5 py-0.5 rounded-lg cursor-pointer"
+                  >
+                    बंद करें ✕
+                  </button>
+                </div>
+
+                {liveState.overHistory && liveState.overHistory.length > 0 && (
+                  <div className="text-[11px] font-black bg-white/80 px-2.5 py-1 rounded-lg">
+                    पिछला ओवर रिकॉर्ड (ओवर #
+                    {
+                      liveState.overHistory[liveState.overHistory.length - 1]
+                        .overNumber
+                    }{' '}
+                    •{' '}
+                    {cleanBroadcastName(
+                      liveState.overHistory[liveState.overHistory.length - 1]
+                        .bowlerName
+                    )}
+                    ):{' '}
+                    <span className="text-red-700">
+                      {
+                        liveState.overHistory[liveState.overHistory.length - 1]
+                          .runs
+                      }{' '}
+                      रन,{' '}
+                      {
+                        liveState.overHistory[liveState.overHistory.length - 1]
+                          .wickets
+                      }{' '}
+                      विकेट
+                    </span>{' '}
+                    [
+                    {liveState.overHistory[
+                      liveState.overHistory.length - 1
+                    ].balls.join(' ')}
+                    ]
+                  </div>
+                )}
+
                 <div className="flex flex-wrap gap-1.5">
-                  {liveState.teamAPlayers
-                    .filter(
-                      (p) =>
-                        p &&
-                        p !== liveState.strikerName &&
-                        p !== liveState.nonStrikerName
-                    )
-                    .map((player, idx) => (
+                  {liveState.teamBPlayers.map((bowler, idx) => {
+                    const bRec = liveState.bowlerRecords?.[bowler];
+                    const isSameBowler = bowler === liveState.bowlerName;
+                    return (
                       <button
                         key={idx}
                         type="button"
-                        onClick={() => {
-                          pushLiveState(
-                            {
-                              ...liveState,
-                              strikerName: player,
-                              strikerRuns: 0,
-                              strikerBalls: 0,
-                            },
-                            true
-                          );
-                          setNeedsNextBatsman(false);
-                          triggerToast(`✓ नया बल्लेबाज "${player}" क्रीज पर!`);
-                        }}
-                        className="px-2.5 py-1.5 rounded-xl bg-slate-950 text-white text-xs font-bold cursor-pointer hover:bg-slate-800"
+                        onClick={() => handleSelectBowlerWithRecord(bowler)}
+                        className={`px-2.5 py-1.5 rounded-xl text-xs font-extrabold cursor-pointer flex items-center gap-1 ${
+                          isSameBowler
+                            ? 'bg-slate-700 text-amber-300 border border-amber-400'
+                            : 'bg-slate-950 text-white hover:bg-slate-800 shadow-xs'
+                        }`}
                       >
-                        + {player}
+                        <span>⚾ {cleanBroadcastName(bowler)}</span>
+                        {bRec && bRec.ballsBowled > 0 && (
+                          <span className="text-[10px] text-sky-300 font-mono">
+                            ({formatBallsToOvers(bRec.ballsBowled)}-
+                            {bRec.runsConceded}-{bRec.wickets}W)
+                          </span>
+                        )}
                       </button>
-                    ))}
+                    );
+                  })}
+                </div>
+
+                {/* Custom / Editable Next Bowler Name Input */}
+                <div className="flex items-center gap-2 pt-1">
+                  <input
+                    type="text"
+                    value={customNextBowler}
+                    onChange={(e) => setCustomNextBowler(e.target.value)}
+                    placeholder="या नए गेंदबाज का नाम यहाँ लिखें / एडिट करें..."
+                    className="flex-1 px-3 py-1.5 rounded-xl bg-white text-slate-950 text-xs font-bold border border-slate-400"
+                  />
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleSelectBowlerWithRecord(customNextBowler)
+                    }
+                    className="px-3 py-1.5 rounded-xl bg-blue-900 text-white text-xs font-black cursor-pointer shrink-0"
+                  >
+                    ✓ ओवर शुरू करें
+                  </button>
                 </div>
               </div>
             )}
@@ -1321,11 +2440,11 @@ export const FBLiveBroadcastStudioView: React.FC<
               </button>
             </div>
 
-            {/* INSTANT MISTAKE CORRECTION BAR (+/- RUNS, WICKETS, BALLS, OVERS) */}
+            {/* INSTANT MISTAKE CORRECTION BAR (+/- RUNS, WICKETS, BALLS, OVERS) — NO SQUISHING! */}
             <div className="bg-slate-900/95 rounded-2xl p-3 border border-slate-700 space-y-2">
-              <div className="flex items-center justify-between text-[11px] font-extrabold text-amber-300">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] font-extrabold text-amber-300">
                 <span>
-                  🛠️ तुरंत गलती सुधार बटन (अगर रन, विकेट या गेंद गलत दब जाए तो यहाँ से घटाएं/बढ़ाएं):
+                  🛠️ तुरंत गलती सुधार बटन (रन, विकेट, गेंद या ओवर घटाएं/बढ़ाएं):
                 </span>
                 <button
                   type="button"
@@ -1339,21 +2458,33 @@ export const FBLiveBroadcastStudioView: React.FC<
                         balls: 0,
                         strikerRuns: 0,
                         strikerBalls: 0,
+                        strikerFours: 0,
+                        strikerSixes: 0,
                         nonStrikerRuns: 0,
                         nonStrikerBalls: 0,
+                        nonStrikerFours: 0,
+                        nonStrikerSixes: 0,
                         bowlerRuns: 0,
                         bowlerWickets: 0,
+                        bowlerBalls: 0,
+                        bowlerOvers: '0.0',
                         thisOverBalls: [],
+                        overHistory: [],
+                        batsmanRecords: {},
+                        bowlerRecords: {},
+                        fieldingRecords: {},
                         celebration: 'none',
                       },
                       true
                     );
-                    triggerToast('✓ स्कोर 0/0 पर रीसेट हो गया (UNDO से वापस भी ला सकते हैं)');
+                    triggerToast(
+                      '✓ नया मैच 0/0 पर रीसेट हो गया (UNDO से वापस भी ला सकते हैं)'
+                    );
                   }}
-                  className="text-red-400 hover:underline flex items-center gap-1 cursor-pointer"
+                  className="px-2.5 py-1 rounded-lg bg-red-600/20 border border-red-500/40 text-red-300 hover:bg-red-600 hover:text-white flex items-center gap-1 cursor-pointer shrink-0 whitespace-nowrap"
                 >
                   <RotateCcw className="w-3 h-3" />
-                  <span>स्कोर 0/0 रीसेट</span>
+                  <span>नया मैच 0/0 रीसेट</span>
                 </button>
               </div>
 
@@ -1363,17 +2494,17 @@ export const FBLiveBroadcastStudioView: React.FC<
                   <button
                     type="button"
                     onClick={() => handleQuickAdjust('runs', -1)}
-                    className="w-8 h-7 rounded-lg bg-red-600/80 hover:bg-red-600 text-white flex items-center justify-center cursor-pointer"
+                    className="w-8 h-7 rounded-lg bg-red-600/80 hover:bg-red-600 text-white flex items-center justify-center cursor-pointer shrink-0"
                   >
                     <Minus className="w-3.5 h-3.5" />
                   </button>
-                  <span className="text-[11px] text-slate-200">
+                  <span className="text-[11px] text-slate-200 truncate px-1">
                     रन ({liveState.runs})
                   </span>
                   <button
                     type="button"
                     onClick={() => handleQuickAdjust('runs', 1)}
-                    className="w-8 h-7 rounded-lg bg-emerald-600/80 hover:bg-emerald-600 text-white flex items-center justify-center cursor-pointer"
+                    className="w-8 h-7 rounded-lg bg-emerald-600/80 hover:bg-emerald-600 text-white flex items-center justify-center cursor-pointer shrink-0"
                   >
                     <Plus className="w-3.5 h-3.5" />
                   </button>
@@ -1384,17 +2515,17 @@ export const FBLiveBroadcastStudioView: React.FC<
                   <button
                     type="button"
                     onClick={() => handleQuickAdjust('wickets', -1)}
-                    className="w-8 h-7 rounded-lg bg-red-600/80 hover:bg-red-600 text-white flex items-center justify-center cursor-pointer"
+                    className="w-8 h-7 rounded-lg bg-red-600/80 hover:bg-red-600 text-white flex items-center justify-center cursor-pointer shrink-0"
                   >
                     <Minus className="w-3.5 h-3.5" />
                   </button>
-                  <span className="text-[11px] text-slate-200">
+                  <span className="text-[11px] text-slate-200 truncate px-1">
                     विकेट ({liveState.wickets})
                   </span>
                   <button
                     type="button"
                     onClick={() => handleQuickAdjust('wickets', 1)}
-                    className="w-8 h-7 rounded-lg bg-emerald-600/80 hover:bg-emerald-600 text-white flex items-center justify-center cursor-pointer"
+                    className="w-8 h-7 rounded-lg bg-emerald-600/80 hover:bg-emerald-600 text-white flex items-center justify-center cursor-pointer shrink-0"
                   >
                     <Plus className="w-3.5 h-3.5" />
                   </button>
@@ -1405,17 +2536,17 @@ export const FBLiveBroadcastStudioView: React.FC<
                   <button
                     type="button"
                     onClick={() => handleQuickAdjust('balls', -1)}
-                    className="w-8 h-7 rounded-lg bg-red-600/80 hover:bg-red-600 text-white flex items-center justify-center cursor-pointer"
+                    className="w-8 h-7 rounded-lg bg-red-600/80 hover:bg-red-600 text-white flex items-center justify-center cursor-pointer shrink-0"
                   >
                     <Minus className="w-3.5 h-3.5" />
                   </button>
-                  <span className="text-[11px] text-slate-200">
+                  <span className="text-[11px] text-slate-200 truncate px-1">
                     गेंद (.{liveState.balls})
                   </span>
                   <button
                     type="button"
                     onClick={() => handleQuickAdjust('balls', 1)}
-                    className="w-8 h-7 rounded-lg bg-emerald-600/80 hover:bg-emerald-600 text-white flex items-center justify-center cursor-pointer"
+                    className="w-8 h-7 rounded-lg bg-emerald-600/80 hover:bg-emerald-600 text-white flex items-center justify-center cursor-pointer shrink-0"
                   >
                     <Plus className="w-3.5 h-3.5" />
                   </button>
@@ -1426,17 +2557,17 @@ export const FBLiveBroadcastStudioView: React.FC<
                   <button
                     type="button"
                     onClick={() => handleQuickAdjust('overs', -1)}
-                    className="w-8 h-7 rounded-lg bg-red-600/80 hover:bg-red-600 text-white flex items-center justify-center cursor-pointer"
+                    className="w-8 h-7 rounded-lg bg-red-600/80 hover:bg-red-600 text-white flex items-center justify-center cursor-pointer shrink-0"
                   >
                     <Minus className="w-3.5 h-3.5" />
                   </button>
-                  <span className="text-[11px] text-slate-200">
+                  <span className="text-[11px] text-slate-200 truncate px-1">
                     ओवर ({liveState.overs})
                   </span>
                   <button
                     type="button"
                     onClick={() => handleQuickAdjust('overs', 1)}
-                    className="w-8 h-7 rounded-lg bg-emerald-600/80 hover:bg-emerald-600 text-white flex items-center justify-center cursor-pointer"
+                    className="w-8 h-7 rounded-lg bg-emerald-600/80 hover:bg-emerald-600 text-white flex items-center justify-center cursor-pointer shrink-0"
                   >
                     <Plus className="w-3.5 h-3.5" />
                   </button>
@@ -1444,7 +2575,7 @@ export const FBLiveBroadcastStudioView: React.FC<
               </div>
             </div>
 
-            {/* SIMPLE TEAM & PLAYER DROPDOWNS RIGHT INSIDE THE PAD */}
+            {/* SIMPLE TEAM & PLAYER DROPDOWNS + EDITABLE NAMES RIGHT INSIDE THE PAD */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
               <div>
                 <label className="block text-[11px] font-bold text-amber-300 mb-1">
@@ -1480,11 +2611,12 @@ export const FBLiveBroadcastStudioView: React.FC<
                 </select>
               </div>
 
-              {/* Striker & Non-Striker with 1-Tap Swap */}
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="text-[11px] font-bold text-slate-300">
-                    बल्लेबाज 1 (Striker*)
+              {/* Striker & Non-Striker with 1-Tap Swap + Editable Name */}
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-bold text-amber-300">
+                    बल्लेबाज 1 (Striker*) — {liveState.strikerRuns}(
+                    {liveState.strikerBalls})
                   </label>
                   <button
                     type="button"
@@ -1494,9 +2626,13 @@ export const FBLiveBroadcastStudioView: React.FC<
                         strikerName: liveState.nonStrikerName,
                         strikerRuns: liveState.nonStrikerRuns,
                         strikerBalls: liveState.nonStrikerBalls,
+                        strikerFours: liveState.nonStrikerFours,
+                        strikerSixes: liveState.nonStrikerSixes,
                         nonStrikerName: liveState.strikerName,
                         nonStrikerRuns: liveState.strikerRuns,
                         nonStrikerBalls: liveState.strikerBalls,
+                        nonStrikerFours: liveState.strikerFours,
+                        nonStrikerSixes: liveState.strikerSixes,
                       })
                     }
                     className="text-[10px] font-black text-amber-400 flex items-center gap-0.5 cursor-pointer"
@@ -1507,12 +2643,7 @@ export const FBLiveBroadcastStudioView: React.FC<
                 </div>
                 <select
                   value={liveState.strikerName}
-                  onChange={(e) =>
-                    pushLiveState({
-                      ...liveState,
-                      strikerName: e.target.value,
-                    })
-                  }
+                  onChange={(e) => handleConfirmNextBatsman(e.target.value)}
                   className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-amber-300 text-xs font-bold"
                 >
                   {liveState.teamAPlayers.map((p, i) => (
@@ -1521,20 +2652,34 @@ export const FBLiveBroadcastStudioView: React.FC<
                     </option>
                   ))}
                 </select>
+                <input
+                  type="text"
+                  value={liveState.strikerName}
+                  onChange={(e) =>
+                    pushLiveState({ ...liveState, strikerName: e.target.value })
+                  }
+                  placeholder="बल्लेबाज 1 का नाम एडिट करें..."
+                  className="w-full px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-slate-200 text-[11px] font-bold"
+                />
               </div>
 
-              <div>
-                <label className="block text-[11px] font-bold text-slate-300 mb-1">
-                  बल्लेबाज 2 (Non-Striker)
+              <div className="space-y-1">
+                <label className="block text-[11px] font-bold text-slate-300">
+                  बल्लेबाज 2 (Non-Striker) — {liveState.nonStrikerRuns}(
+                  {liveState.nonStrikerBalls})
                 </label>
                 <select
                   value={liveState.nonStrikerName}
-                  onChange={(e) =>
+                  onChange={(e) => {
+                    const chosen = e.target.value;
+                    const rec = liveState.batsmanRecords?.[chosen];
                     pushLiveState({
                       ...liveState,
-                      nonStrikerName: e.target.value,
-                    })
-                  }
+                      nonStrikerName: chosen,
+                      nonStrikerRuns: rec?.runs || 0,
+                      nonStrikerBalls: rec?.balls || 0,
+                    });
+                  }}
                   className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs font-bold"
                 >
                   {liveState.teamAPlayers.map((p, i) => (
@@ -1543,20 +2688,37 @@ export const FBLiveBroadcastStudioView: React.FC<
                     </option>
                   ))}
                 </select>
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-bold text-slate-300 mb-1">
-                  वर्तमान गेंदबाज (Current Bowler)
-                </label>
-                <select
-                  value={liveState.bowlerName}
+                <input
+                  type="text"
+                  value={liveState.nonStrikerName}
                   onChange={(e) =>
                     pushLiveState({
                       ...liveState,
-                      bowlerName: e.target.value,
+                      nonStrikerName: e.target.value,
                     })
                   }
+                  placeholder="बल्लेबाज 2 का नाम एडिट करें..."
+                  className="w-full px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-slate-200 text-[11px] font-bold"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-bold text-sky-300">
+                    वर्तमान गेंदबाज ({liveState.bowlerOvers || '0.0'} Ov,{' '}
+                    {liveState.bowlerRuns}R, {liveState.bowlerWickets}W)
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setNeedsNextBowler(true)}
+                    className="text-[10px] font-black text-sky-400 underline cursor-pointer"
+                  >
+                    गेंदबाज बदलें
+                  </button>
+                </div>
+                <select
+                  value={liveState.bowlerName}
+                  onChange={(e) => handleSelectBowlerWithRecord(e.target.value)}
                   className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-sky-300 text-xs font-bold"
                 >
                   {liveState.teamBPlayers.map((p, i) => (
@@ -1565,87 +2727,696 @@ export const FBLiveBroadcastStudioView: React.FC<
                     </option>
                   ))}
                 </select>
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-bold text-slate-300 mb-1">
-                  टारगेट रन (पहली पारी में 0 रखें)
-                </label>
                 <input
-                  type="number"
-                  value={liveState.targetRuns}
+                  type="text"
+                  value={liveState.bowlerName}
                   onChange={(e) =>
-                    pushLiveState({
-                      ...liveState,
-                      targetRuns: Number(e.target.value),
-                    })
+                    pushLiveState({ ...liveState, bowlerName: e.target.value })
                   }
-                  placeholder="0 = 1st Innings"
-                  className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs font-mono font-bold"
+                  placeholder="गेंदबाज का नाम एडिट करें..."
+                  className="w-full px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-slate-200 text-[11px] font-bold"
                 />
               </div>
-            </div>
-          </div>
 
-          {/* CARD B: 1-TAP SCREEN DISPLAY BUTTONS (SHOW 15-PLAYER LIST OR FULL AD ON LIVE) */}
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 space-y-3 shadow-xs">
-            <h3 className="text-xs sm:text-sm font-black text-slate-900 dark:text-white flex items-center gap-1.5">
-              <Tv className="w-4 h-4 text-red-600" />
-              <span>
-                लाइव स्क्रीन पर 15-खिलाड़ी सूची या बड़ा विज्ञापन दिखाएं (1-Tap Screen Mode):
-              </span>
-            </h3>
-
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              {[
-                {
-                  mode: 'score-ticker' as BroadcastScreenMode,
-                  label: '📺 नॉर्मल मैच मोड (सिर्फ नीचे पट्टी)',
-                },
-                {
-                  mode: 'squad-team-a' as BroadcastScreenMode,
-                  label: `👥 ${liveState.battingTeamName} (15 खिलाड़ी)`,
-                },
-                {
-                  mode: 'squad-team-b' as BroadcastScreenMode,
-                  label: `👥 ${liveState.bowlingTeamName} (15 खिलाड़ी)`,
-                },
-                {
-                  mode: 'squad-vs-both' as BroadcastScreenMode,
-                  label: '⚔️ दोनों टीमों की सूची एक साथ',
-                },
-                {
-                  mode: 'full-sponsor-ad' as BroadcastScreenMode,
-                  label: '📢 फुल-स्क्रीन दुकान विज्ञापन',
-                },
-              ].map((b) => {
-                const active = liveState.screenMode === b.mode;
-                return (
-                  <button
-                    key={b.mode}
-                    type="button"
-                    onClick={() =>
+              <div className="space-y-1">
+                <label className="block text-[11px] font-bold text-slate-300">
+                  टारगेट रन (पहली पारी में 0 रखें) & मैच ओवर:
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    type="number"
+                    value={liveState.targetRuns}
+                    onChange={(e) =>
                       pushLiveState({
                         ...liveState,
-                        screenMode: b.mode,
-                        celebration: 'none',
+                        targetRuns: Number(e.target.value),
                       })
                     }
-                    className={`p-2.5 rounded-xl text-xs font-black text-left cursor-pointer border transition-all ${
-                      active
-                        ? 'bg-[#0B192C] dark:bg-amber-500 text-amber-400 dark:text-slate-950 border-amber-500 shadow-sm'
-                        : 'bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border-slate-200 dark:border-slate-700'
-                    }`}
-                  >
-                    {b.label}
-                  </button>
-                );
-              })}
+                    placeholder="Target (0=1st Inn)"
+                    className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs font-mono font-bold"
+                  />
+                  <input
+                    type="number"
+                    value={liveState.totalMatchOvers}
+                    onChange={(e) =>
+                      pushLiveState({
+                        ...liveState,
+                        totalMatchOvers: Math.max(1, Number(e.target.value)),
+                      })
+                    }
+                    placeholder="कुल ओवर (16)"
+                    className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-amber-300 text-xs font-mono font-bold"
+                  />
+                </div>
+              </div>
             </div>
           </div>
 
-          {/* CARD C: SIMPLE LOCAL MARKET SPONSOR AD LIST */}
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 space-y-3 shadow-xs">
+          {/* =================================================================
+              CARD B: DYNAMIC MATCH RECORD (BATSMEN, BOWLERS, PREVIOUS OVERS, FIELDING)
+          ================================================================= */}
+          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-4 sm:p-5 space-y-4 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 dark:border-slate-800 pb-3">
+              <div>
+                <h3 className="text-sm sm:text-base font-black text-slate-900 dark:text-white flex items-center gap-1.5">
+                  <History className="w-4 h-4 text-blue-600" />
+                  <span>
+                    📊 डायनामिक मैच रिकॉर्ड (बल्लेबाज, गेंदबाज और पिछले ओवर का पूरा हिसाब)
+                  </span>
+                </h3>
+                <p className="text-[11px] font-bold text-slate-500">
+                  हर गेंद पर अपने-आप अपडेट होता है • अवार्ड्स के लिए कैच/कीपिंग/फील्डिंग भी यहीं से जोड़ें
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleSaveMatchToSeries}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs cursor-pointer shadow-sm"
+              >
+                <Save className="w-3.5 h-3.5" />
+                <span>💾 इस मैच को 8-टीम सीरीज़ रिकॉर्ड में सेव करें</span>
+              </button>
+            </div>
+
+            {/* 1. PREVIOUS OVERS RECORD (पिछले हर ओवर का रिकॉर्ड) */}
+            <div className="bg-slate-50 dark:bg-slate-800/60 rounded-2xl p-3 border border-slate-200 dark:border-slate-700 space-y-2">
+              <div className="text-xs font-black text-slate-800 dark:text-amber-300 flex items-center justify-between">
+                <span>⏮️ पिछले ओवर्स का रिकॉर्ड (Over-by-Over History):</span>
+                <span className="text-[11px] text-slate-500">
+                  कुल पूरे ओवर: {liveState.overHistory?.length || 0}
+                </span>
+              </div>
+
+              {liveState.overHistory && liveState.overHistory.length > 0 ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-40 overflow-y-auto">
+                  {[...liveState.overHistory].reverse().map((ov, idx) => (
+                    <div
+                      key={idx}
+                      className="flex items-center justify-between gap-2 bg-white dark:bg-slate-900 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs"
+                    >
+                      <div className="min-w-0">
+                        <div className="font-black text-slate-900 dark:text-white truncate">
+                          ओवर #{ov.overNumber} •{' '}
+                          <span className="text-blue-600 dark:text-sky-400">
+                            {cleanBroadcastName(ov.bowlerName)}
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {ov.balls.map((b, bIdx) => (
+                            <span
+                              key={bIdx}
+                              className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-black ${
+                                b === '6'
+                                  ? 'bg-amber-400 text-slate-950'
+                                  : b === '4'
+                                  ? 'bg-emerald-600 text-white'
+                                  : b === 'W'
+                                  ? 'bg-red-600 text-white'
+                                  : 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
+                              }`}
+                            >
+                              {b}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="text-right font-mono font-black shrink-0">
+                        <div className="text-slate-900 dark:text-white">
+                          {ov.runs} रन
+                        </div>
+                        <div className="text-[10px] text-red-600">
+                          {ov.wickets} विकेट
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-xs font-bold text-slate-500 py-2">
+                  अभी पहला ओवर चल रहा है — जैसे ही 6 गेंद पूरी होंगी, हर ओवर का रिकॉर्ड यहाँ अपने-आप सेव होता जाएगा।
+                </div>
+              )}
+            </div>
+
+            {/* 2. BATSMEN & BOWLERS LIVE TABLES */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {/* Batsmen Record Table */}
+              <div className="rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+                <div className="bg-amber-500 text-slate-950 px-3 py-2 text-xs font-black flex justify-between">
+                  <span>🏏 बल्लेबाज रिकॉर्ड ({liveState.battingTeamName})</span>
+                  <span>R (B) • 4s/6s • SR</span>
+                </div>
+                <div className="divide-y divide-slate-200 dark:divide-slate-800 max-h-56 overflow-y-auto bg-white dark:bg-slate-900">
+                  {Object.values(liveState.batsmanRecords || {}).map(
+                    (bat, idx) => {
+                      const sr =
+                        bat.balls > 0
+                          ? Math.round((bat.runs / bat.balls) * 100)
+                          : 0;
+                      const isStriker = bat.name === liveState.strikerName;
+                      const isNonStriker =
+                        bat.name === liveState.nonStrikerName;
+                      return (
+                        <div
+                          key={idx}
+                          className={`px-3 py-2 flex items-center justify-between text-xs ${
+                            isStriker || isNonStriker
+                              ? 'bg-amber-50/70 dark:bg-amber-950/20'
+                              : ''
+                          }`}
+                        >
+                          <div className="min-w-0">
+                            <div className="font-black text-slate-900 dark:text-white truncate">
+                              {cleanBroadcastName(bat.name)}{' '}
+                              {isStriker && (
+                                <span className="text-amber-600 dark:text-amber-400">
+                                  * (Striker)
+                                </span>
+                              )}
+                              {isNonStriker && (
+                                <span className="text-emerald-600">
+                                  (Non-Striker)
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[10px] font-bold text-slate-500">
+                              {bat.isOut ? (
+                                <span className="text-red-600">
+                                  OUT ({bat.dismissalText})
+                                </span>
+                              ) : (
+                                <span className="text-emerald-600">
+                                  Not Out
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <div className="font-mono font-black text-right shrink-0">
+                            <span className="text-sm text-slate-900 dark:text-white">
+                              {bat.runs}
+                            </span>
+                            <span className="text-slate-500 text-[11px]">
+                              ({bat.balls})
+                            </span>
+                            <div className="text-[10px] text-slate-500">
+                              4s:{bat.fours} • 6s:{bat.sixes} • SR:{sr}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    }
+                  )}
+                </div>
+              </div>
+
+              {/* Bowlers Record Table */}
+              <div className="rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+                <div className="bg-blue-700 text-white px-3 py-2 text-xs font-black flex justify-between">
+                  <span>⚾ गेंदबाज रिकॉर्ड ({liveState.bowlingTeamName})</span>
+                  <span>O • 0s • R • W • ECO</span>
+                </div>
+                <div className="divide-y divide-slate-200 dark:divide-slate-800 max-h-56 overflow-y-auto bg-white dark:bg-slate-900">
+                  {Object.values(liveState.bowlerRecords || {}).map(
+                    (bw, idx) => {
+                      const oversNum = bw.ballsBowled / 6;
+                      const eco =
+                        oversNum > 0
+                          ? (bw.runsConceded / oversNum).toFixed(1)
+                          : '0.0';
+                      const isCurrent = bw.name === liveState.bowlerName;
+                      return (
+                        <div
+                          key={idx}
+                          className={`px-3 py-2 flex items-center justify-between text-xs ${
+                            isCurrent
+                              ? 'bg-sky-50/70 dark:bg-sky-950/30'
+                              : ''
+                          }`}
+                        >
+                          <div className="min-w-0">
+                            <div className="font-black text-slate-900 dark:text-white truncate">
+                              {cleanBroadcastName(bw.name)}{' '}
+                              {isCurrent && (
+                                <span className="text-blue-600 dark:text-sky-400">
+                                  * (Bowling)
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[10px] font-bold text-slate-500">
+                              डॉट गेंद: {bw.dots} • चौके: {bw.foursConceded} • छक्के:{' '}
+                              {bw.sixesConceded}
+                            </div>
+                          </div>
+                          <div className="font-mono font-black text-right shrink-0">
+                            <span className="text-sm text-blue-700 dark:text-sky-400">
+                              {bw.wickets}W
+                            </span>{' '}
+                            - {bw.runsConceded}R
+                            <div className="text-[10px] text-slate-500">
+                              {formatBallsToOvers(bw.ballsBowled)} Ov • Eco:{' '}
+                              {eco}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    }
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* 3. QUICK 1-TAP CATCH / KEEPING / FIELDING CREDIT BAR FOR AWARDS */}
+            <div className="bg-emerald-50 dark:bg-emerald-950/30 rounded-2xl p-3 border border-emerald-300 dark:border-emerald-800/60 space-y-2">
+              <div className="text-xs font-black text-emerald-950 dark:text-emerald-300 flex items-center gap-1.5">
+                <UserPlus className="w-4 h-4" />
+                <span>
+                  🧤 बेस्ट कैच, बेस्ट कीपिंग और बेस्ट फील्डर के लिए 1-क्लिक में पॉइंट जोड़ें:
+                </span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center">
+                <select
+                  value={
+                    selectedFielderForCredit ||
+                    liveState.teamBPlayers[0] ||
+                    ''
+                  }
+                  onChange={(e) => setSelectedFielderForCredit(e.target.value)}
+                  className="sm:col-span-5 px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-emerald-400 text-xs font-extrabold text-slate-900 dark:text-white"
+                >
+                  {[...liveState.teamBPlayers, ...liveState.teamAPlayers].map(
+                    (p, idx) => (
+                      <option key={idx} value={p}>
+                        {cleanBroadcastName(p)}
+                      </option>
+                    )
+                  )}
+                </select>
+
+                <div className="sm:col-span-7 grid grid-cols-3 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleAddFieldingCredit(
+                        selectedFielderForCredit ||
+                          liveState.teamBPlayers[0] ||
+                          'फील्डर',
+                        'Catch'
+                      )
+                    }
+                    className="py-2 px-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-[11px] font-black cursor-pointer"
+                  >
+                    🙌 +1 कैच
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleAddFieldingCredit(
+                        selectedFielderForCredit ||
+                          liveState.teamBPlayers[0] ||
+                          'कीपर',
+                        'Keeping'
+                      )
+                    }
+                    className="py-2 px-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-black cursor-pointer"
+                  >
+                    🧤 +1 कीपिंग/स्टंप
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleAddFieldingCredit(
+                        selectedFielderForCredit ||
+                          liveState.teamBPlayers[0] ||
+                          'फील्डर',
+                        'Save'
+                      )
+                    }
+                    className="py-2 px-2 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-[11px] font-black cursor-pointer"
+                  >
+                    ⚡ +1 फील्डिंग सेव
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* =================================================================
+              CARD C: AUTOMATIC 8-TEAM TOURNAMENT & MATCH AWARDS CALCULATOR
+          ================================================================= */}
+          <div className="bg-gradient-to-br from-[#0B192C] via-slate-900 to-[#0B192C] text-white rounded-3xl border-2 border-amber-400 p-4 sm:p-5 space-y-4 shadow-xl">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/15 pb-3">
+              <div>
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-400 text-slate-950 text-[10px] font-black uppercase">
+                  <Trophy className="w-3 h-3" />
+                  100% Automatic Awards Calculator
+                </span>
+                <h3 className="text-base sm:text-lg font-black text-amber-300 mt-1">
+                  🏆 ऑटोमैटिक अवार्ड्स कैलकुलेटर (8-टीम टूर्नामेंट & वर्तमान मैच)
+                </h3>
+                <p className="text-[11px] font-bold text-slate-300">
+                  रन, विकेट, चौके-छक्के, कैच, कीपिंग और फील्डिंग के आधार पर अपने-आप विजेता का नाम निकल आता है!
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  pushLiveState({
+                    ...liveState,
+                    screenMode:
+                      liveState.screenMode === 'awards-ceremony'
+                        ? 'score-ticker'
+                        : 'awards-ceremony',
+                  });
+                  triggerToast(
+                    '🏆 लाइव स्क्रीन पर ऑटोमैटिक अवार्ड्स कार्ड दिखाया गया!'
+                  );
+                }}
+                className="px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs cursor-pointer flex items-center gap-1.5 shadow-md"
+              >
+                <Award className="w-4 h-4" />
+                <span>
+                  {liveState.screenMode === 'awards-ceremony'
+                    ? '📺 नॉर्मल स्कोर पट्टी पर लौटें'
+                    : '📺 लाइव टीवी पर अवार्ड्स दिखाएं'}
+                </span>
+              </button>
+            </div>
+
+            {/* 7 AUTOMATIC AWARD CARDS */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+              {/* 1. Man of the Match */}
+              <div className="bg-amber-500/20 border-2 border-amber-400 rounded-2xl p-3 space-y-1">
+                <div className="text-[10px] font-black uppercase text-amber-300">
+                  🏅 1. Man of the Match (इस मैच में)
+                </div>
+                <div className="text-sm font-black text-white truncate">
+                  {cleanBroadcastName(
+                    currentMatchAwards.manOfTheMatch?.name
+                  ) || 'स्कोरिंग शुरू करें'}
+                </div>
+                <div className="text-[11px] font-bold text-amber-200">
+                  {currentMatchAwards.manOfTheMatch
+                    ? `${currentMatchAwards.manOfTheMatch.summary} (${currentMatchAwards.manOfTheMatch.points} Pts)`
+                    : 'रन और विकेट के आधार पर ऑटोमैटिक'}
+                </div>
+              </div>
+
+              {/* 2. Man of the Series (8-Team Cumulative) */}
+              <div className="bg-gradient-to-r from-red-600/30 to-amber-500/30 border-2 border-amber-300 rounded-2xl p-3 space-y-1">
+                <div className="text-[10px] font-black uppercase text-amber-200">
+                  🏆 2. Man of the Series (पूरे टूर्नामेंट में)
+                </div>
+                <div className="text-sm font-black text-white truncate">
+                  {cleanBroadcastName(
+                    seriesCumulativeAwards.manOfTheMatch?.name
+                  ) || 'स्कोरिंग शुरू करें'}
+                </div>
+                <div className="text-[11px] font-bold text-amber-100">
+                  {seriesCumulativeAwards.manOfTheMatch
+                    ? `${seriesCumulativeAwards.manOfTheMatch.summary} (${seriesCumulativeAwards.manOfTheMatch.points} Pts)`
+                    : `कुल सेव मैच: ${seriesMatches.length}`}
+                </div>
+              </div>
+
+              {/* 3. Best Batsman */}
+              <div className="bg-blue-600/20 border border-blue-400 rounded-2xl p-3 space-y-1">
+                <div className="text-[10px] font-black uppercase text-sky-300">
+                  🏏 3. Best Batsman (बेस्ट बैट्समैन)
+                </div>
+                <div className="text-sm font-black text-white truncate">
+                  {cleanBroadcastName(
+                    seriesCumulativeAwards.bestBatsman?.name
+                  ) || '—'}
+                </div>
+                <div className="text-[11px] font-bold text-sky-200">
+                  {seriesCumulativeAwards.bestBatsman
+                    ? `${seriesCumulativeAwards.bestBatsman.runs} रन (${seriesCumulativeAwards.bestBatsman.balls} गेंद) • 4s:${seriesCumulativeAwards.bestBatsman.fours} 6s:${seriesCumulativeAwards.bestBatsman.sixes}`
+                    : 'सर्वाधिक रन बनाने वाला बल्लेबाज'}
+                </div>
+              </div>
+
+              {/* 4. Best Bowler */}
+              <div className="bg-emerald-600/20 border border-emerald-400 rounded-2xl p-3 space-y-1">
+                <div className="text-[10px] font-black uppercase text-emerald-300">
+                  ⚾ 4. Best Bowler (बेस्ट बॉलर)
+                </div>
+                <div className="text-sm font-black text-white truncate">
+                  {cleanBroadcastName(
+                    seriesCumulativeAwards.bestBowler?.name
+                  ) || '—'}
+                </div>
+                <div className="text-[11px] font-bold text-emerald-200">
+                  {seriesCumulativeAwards.bestBowler
+                    ? `${seriesCumulativeAwards.bestBowler.wickets} विकेट (${formatBallsToOvers(
+                        seriesCumulativeAwards.bestBowler.ballsBowled
+                      )} ओवर, ${seriesCumulativeAwards.bestBowler.runsConceded} रन)`
+                    : 'सर्वाधिक विकेट लेने वाला गेंदबाज'}
+                </div>
+              </div>
+
+              {/* 5. Best Catch */}
+              <div className="bg-purple-600/20 border border-purple-400 rounded-2xl p-3 space-y-1">
+                <div className="text-[10px] font-black uppercase text-purple-300">
+                  🙌 5. Best Catch (बेस्ट कैच)
+                </div>
+                <div className="text-sm font-black text-white truncate">
+                  {cleanBroadcastName(seriesCumulativeAwards.bestCatch?.name) ||
+                    '—'}
+                </div>
+                <div className="text-[11px] font-bold text-purple-200">
+                  {seriesCumulativeAwards.bestCatch
+                    ? `कुल ${seriesCumulativeAwards.bestCatch.catches} शानदार कैच`
+                    : 'विकेट या फील्डिंग से +1 कैच जोड़ें'}
+                </div>
+              </div>
+
+              {/* 6. Best Wicket-Keeper & 7. Best Fielder */}
+              <div className="bg-rose-600/20 border border-rose-400 rounded-2xl p-3 space-y-1">
+                <div className="text-[10px] font-black uppercase text-rose-300">
+                  🧤 6. Best Keeper & ⚡ 7. Best Fielder
+                </div>
+                <div className="text-xs font-black text-white truncate">
+                  कीपर:{' '}
+                  {cleanBroadcastName(
+                    seriesCumulativeAwards.bestKeeper?.name
+                  ) || '—'}{' '}
+                  {seriesCumulativeAwards.bestKeeper
+                    ? `(${seriesCumulativeAwards.bestKeeper.keepings})`
+                    : ''}
+                </div>
+                <div className="text-xs font-black text-teal-300 truncate">
+                  फील्डर:{' '}
+                  {cleanBroadcastName(
+                    seriesCumulativeAwards.bestFielder?.name
+                  ) || '—'}{' '}
+                  {seriesCumulativeAwards.bestFielder
+                    ? `(${
+                        seriesCumulativeAwards.bestFielder.catches +
+                        seriesCumulativeAwards.bestFielder.runOuts +
+                        seriesCumulativeAwards.bestFielder.saves
+                      } शिकार)`
+                    : ''}
+                </div>
+              </div>
+            </div>
+
+            {seriesMatches.length > 0 && (
+              <div className="flex items-center justify-between pt-2 border-t border-white/10 text-[11px] text-slate-300">
+                <span>
+                  📚 8-टीम सीरीज़ में सेव किए गए कुल मैच: {seriesMatches.length}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSeriesMatches([]);
+                    localStorage.removeItem(SERIES_STORAGE_KEY);
+                    triggerToast('सीरीज़ इतिहास साफ कर दिया गया');
+                  }}
+                  className="text-red-400 hover:underline flex items-center gap-1 cursor-pointer"
+                >
+                  <Trash2 className="w-3 h-3" />
+                  <span>सीरीज़ रिकॉर्ड रीसेट करें</span>
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* RIGHT 5 COLUMNS: LIVE TV PREVIEW MONITOR + SCREEN MODES + SPONSOR ADS */}
+        <div className="lg:col-span-5 lg:sticky lg:top-16 space-y-4">
+          {/* LIVE TV MONITOR */}
+          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-4 space-y-3 shadow-sm">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-black uppercase text-red-600 flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-red-600 animate-ping" />
+                <span>LIVE TV MONITOR (मोबाइल 1 पर ऐसा दिखेगा)</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setFullscreenMonitor(true)}
+                className="text-xs font-extrabold text-blue-600 hover:underline cursor-pointer"
+              >
+                Full Screen ↗
+              </button>
+            </div>
+
+            <div className="w-full overflow-hidden rounded-2xl">
+              <BroadcastOverlayCanvas
+                state={liveState}
+                transparentBg={false}
+                compactPreview={true}
+              />
+            </div>
+
+            {/* 1-TAP SCREEN DISPLAY BUTTONS */}
+            <div className="space-y-1.5 pt-1">
+              <div className="text-xs font-black text-slate-900 dark:text-white flex items-center gap-1.5">
+                <Tv className="w-4 h-4 text-red-600" />
+                <span>
+                  लाइव स्क्रीन पर क्या दिखाना है? (1-Tap Screen Mode):
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-1.5">
+                {[
+                  {
+                    mode: 'score-ticker' as BroadcastScreenMode,
+                    label: '📺 नॉर्मल मैच मोड (नीचे स्कोर पट्टी)',
+                  },
+                  {
+                    mode: 'full-scorecard' as BroadcastScreenMode,
+                    label: '📊 पूरा मैच स्कोरकार्ड दिखाएं',
+                  },
+                  {
+                    mode: 'awards-ceremony' as BroadcastScreenMode,
+                    label: '🏆 ऑटोमैटिक 7 अवार्ड्स दिखाएं',
+                  },
+                  {
+                    mode: 'squad-team-a' as BroadcastScreenMode,
+                    label: `👥 ${liveState.battingTeamName} (15 खिलाड़ी)`,
+                  },
+                  {
+                    mode: 'squad-team-b' as BroadcastScreenMode,
+                    label: `👥 ${liveState.bowlingTeamName} (15 खिलाड़ी)`,
+                  },
+                  {
+                    mode: 'squad-vs-both' as BroadcastScreenMode,
+                    label: '⚔️ दोनों टीमों की सूची एक साथ',
+                  },
+                  {
+                    mode: 'full-sponsor-ad' as BroadcastScreenMode,
+                    label: '📢 फुल-स्क्रीन दुकान विज्ञापन',
+                  },
+                ].map((b) => {
+                  const active = liveState.screenMode === b.mode;
+                  return (
+                    <button
+                      key={b.mode}
+                      type="button"
+                      onClick={() =>
+                        pushLiveState({
+                          ...liveState,
+                          screenMode: b.mode,
+                          celebration: 'none',
+                        })
+                      }
+                      className={`p-2 rounded-xl text-[11px] font-black text-left cursor-pointer border transition-all ${
+                        active
+                          ? 'bg-[#0B192C] dark:bg-amber-500 text-amber-400 dark:text-slate-950 border-amber-500 shadow-sm'
+                          : 'bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border-slate-200 dark:border-slate-700'
+                      }`}
+                    >
+                      {b.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Download HD JPG / PDF for Facebook Page */}
+            <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={async () => {
+                  const baseTpl =
+                    templates.find((t) => t.id === 'tpl-fb-live-score-ad') ||
+                    templates[0];
+                  const sp =
+                    liveState.sponsorsList[
+                      liveState.activeSponsorIndex %
+                        Math.max(1, liveState.sponsorsList.length)
+                    ];
+                  const customDoc: DesignDocument = {
+                    ...baseTpl,
+                    name: `${liveState.battingTeamName}_vs_${liveState.bowlingTeamName}_Score`,
+                    elements: baseTpl.elements.map((el) => {
+                      if (el.id === 'fbl-score-main') {
+                        return {
+                          ...el,
+                          text: `${liveState.battingTeamName}: ${liveState.runs}/${liveState.wickets} (${liveState.overs}.${liveState.balls} OV) | VS ${liveState.bowlingTeamName}`,
+                        };
+                      }
+                      if (el.id === 'fbl-batsmen') {
+                        return {
+                          ...el,
+                          text: `🏏 ${cleanBroadcastName(
+                            liveState.strikerName
+                          )}: ${liveState.strikerRuns}(${
+                            liveState.strikerBalls
+                          }) | 🏏 ${cleanBroadcastName(
+                            liveState.nonStrikerName
+                          )}: ${liveState.nonStrikerRuns}(${
+                            liveState.nonStrikerBalls
+                          }) | ⚾ ${cleanBroadcastName(liveState.bowlerName)}`,
+                        };
+                      }
+                      if (el.id === 'fbl-ad-banner' && sp) {
+                        return {
+                          ...el,
+                          text: `📢 प्रायोजक: ${sp.shopName} (${sp.address}) — ${sp.tagline} | 📞 ${sp.mobile}`,
+                        };
+                      }
+                      return el;
+                    }),
+                  };
+                  await exportDesignDocument(customDoc, {
+                    format: 'jpg',
+                    preset: 'original',
+                    scale: 3,
+                    filename: customDoc.name,
+                  });
+                }}
+                className="py-2.5 px-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <ImageIcon className="w-4 h-4" />
+                <span>स्कोर पोस्ट HD JPG</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={async () => {
+                  const baseTpl =
+                    templates.find((t) => t.id === 'tpl-fb-live-score-ad') ||
+                    templates[0];
+                  await exportDesignDocument(baseTpl, {
+                    format: 'pdf',
+                    preset: 'original',
+                    scale: 3,
+                    filename: `${liveState.battingTeamName}_Live_Score`,
+                  });
+                }}
+                className="py-2.5 px-3 rounded-xl bg-red-600 hover:bg-red-500 text-white font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <FileText className="w-4 h-4" />
+                <span>स्कोर कार्ड HD PDF</span>
+              </button>
+            </div>
+          </div>
+
+          {/* LOCAL MARKET SPONSOR AD CONTROLLER */}
+          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-4 space-y-3 shadow-xs">
             <div className="flex items-center justify-between">
               <h3 className="text-xs sm:text-sm font-black text-slate-900 dark:text-white flex items-center gap-1.5">
                 <Megaphone className="w-4 h-4 text-amber-500" />
@@ -1656,7 +3427,7 @@ export const FBLiveBroadcastStudioView: React.FC<
               </span>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 gap-2 max-h-60 overflow-y-auto">
               {liveState.sponsorsList.map((sp, idx) => {
                 const isCurrent =
                   liveState.activeSponsorIndex %
@@ -1672,7 +3443,9 @@ export const FBLiveBroadcastStudioView: React.FC<
                         activeSponsorIndex: idx,
                         showSponsorTicker: true,
                       });
-                      triggerToast(`✓ "${sp.shopName}" का विज्ञापन चालू हो गया!`);
+                      triggerToast(
+                        `✓ "${sp.shopName}" का विज्ञापन चालू हो गया!`
+                      );
                     }}
                     className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex items-center justify-between gap-2 ${
                       isCurrent
@@ -1749,104 +3522,6 @@ export const FBLiveBroadcastStudioView: React.FC<
                 + दुकान जोड़ें
               </button>
             </form>
-          </div>
-        </div>
-
-        {/* RIGHT 5 COLUMNS: LIVE TV PREVIEW MONITOR & FB POST DOWNLOAD */}
-        <div className="lg:col-span-5 lg:sticky lg:top-20 space-y-4">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 space-y-3 shadow-sm">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-black uppercase text-red-600 flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-red-600 animate-ping" />
-                <span>LIVE TV MONITOR (मोबाइल 1 पर ऐसा दिखेगा)</span>
-              </span>
-              <button
-                type="button"
-                onClick={() => setFullscreenMonitor(true)}
-                className="text-xs font-extrabold text-blue-600 hover:underline cursor-pointer"
-              >
-                Full Screen ↗
-              </button>
-            </div>
-
-            <div className="w-full overflow-hidden rounded-2xl">
-              <BroadcastOverlayCanvas
-                state={liveState}
-                transparentBg={false}
-                compactPreview={true}
-              />
-            </div>
-
-            {/* Download HD JPG / PDF for Facebook Page */}
-            <div className="grid grid-cols-2 gap-2 pt-1">
-              <button
-                type="button"
-                onClick={async () => {
-                  const baseTpl =
-                    templates.find((t) => t.id === 'tpl-fb-live-score-ad') ||
-                    templates[0];
-                  const sp =
-                    liveState.sponsorsList[
-                      liveState.activeSponsorIndex %
-                        Math.max(1, liveState.sponsorsList.length)
-                    ];
-                  const customDoc: DesignDocument = {
-                    ...baseTpl,
-                    name: `${liveState.battingTeamName}_vs_${liveState.bowlingTeamName}_Score`,
-                    elements: baseTpl.elements.map((el) => {
-                      if (el.id === 'fbl-score-main') {
-                        return {
-                          ...el,
-                          text: `${liveState.battingTeamName}: ${liveState.runs}/${liveState.wickets} (${liveState.overs}.${liveState.balls} OV) | VS ${liveState.bowlingTeamName}`,
-                        };
-                      }
-                      if (el.id === 'fbl-batsmen') {
-                        return {
-                          ...el,
-                          text: `🏏 ${liveState.strikerName}: ${liveState.strikerRuns}(${liveState.strikerBalls}) | 🏏 ${liveState.nonStrikerName}: ${liveState.nonStrikerRuns}(${liveState.nonStrikerBalls}) | ⚾ ${liveState.bowlerName}`,
-                        };
-                      }
-                      if (el.id === 'fbl-ad-banner' && sp) {
-                        return {
-                          ...el,
-                          text: `📢 प्रायोजक: ${sp.shopName} (${sp.address}) — ${sp.tagline} | 📞 ${sp.mobile}`,
-                        };
-                      }
-                      return el;
-                    }),
-                  };
-                  await exportDesignDocument(customDoc, {
-                    format: 'jpg',
-                    preset: 'original',
-                    scale: 3,
-                    filename: customDoc.name,
-                  });
-                }}
-                className="py-2.5 px-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer"
-              >
-                <ImageIcon className="w-4 h-4" />
-                <span>स्कोर पोस्ट HD JPG</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={async () => {
-                  const baseTpl =
-                    templates.find((t) => t.id === 'tpl-fb-live-score-ad') ||
-                    templates[0];
-                  await exportDesignDocument(baseTpl, {
-                    format: 'pdf',
-                    preset: 'original',
-                    scale: 3,
-                    filename: `${liveState.battingTeamName}_Live_Score`,
-                  });
-                }}
-                className="py-2.5 px-3 rounded-xl bg-red-600 hover:bg-red-500 text-white font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer"
-              >
-                <FileText className="w-4 h-4" />
-                <span>स्कोर कार्ड HD PDF</span>
-              </button>
-            </div>
           </div>
         </div>
       </div>

@@ -26,6 +26,8 @@ export type BroadcastScreenMode =
   | 'squad-team-a'       // Show Batting Team 15-Player List on screen
   | 'squad-team-b'       // Show Bowling Team 15-Player List on screen
   | 'squad-vs-both'      // Show Both Teams (Team A vs Team B) Playing XI + Extra side-by-side
+  | 'full-scorecard'     // Show Full Match Batting, Bowling & Previous Overs Record on Live TV
+  | 'awards-ceremony'    // Show Automatic Match & Series Awards (MoM, Best Batsman, Bowler, Catch, Keeper, Fielder)
   | 'full-sponsor-ad'    // Full-screen Local Market Sponsor Ad during Over/Drinks break
   | 'match-summary';     // Match Toss / Target / Need X runs in Y balls card
 
@@ -36,6 +38,45 @@ export type BroadcastCelebrationType =
   | 'WICKET'
   | 'FIFTY'
   | 'WIN';
+
+export interface BatsmanLiveStat {
+  name: string;
+  team: string;
+  runs: number;
+  balls: number;
+  fours: number;
+  sixes: number;
+  isOut: boolean;
+  dismissalText: string;
+}
+
+export interface BowlerLiveStat {
+  name: string;
+  team: string;
+  ballsBowled: number;
+  runsConceded: number;
+  wickets: number;
+  dots: number;
+  foursConceded: number;
+  sixesConceded: number;
+}
+
+export interface FieldingLiveStat {
+  name: string;
+  team: string;
+  catches: number;
+  keepings: number; // Stumpings + Keeper catches
+  runOuts: number;
+  saves: number;    // Boundary / diving saves
+}
+
+export interface OverSummaryRecord {
+  overNumber: number;
+  bowlerName: string;
+  balls: string[];
+  runs: number;
+  wickets: number;
+}
 
 export interface LiveBroadcastRoomState {
   roomId: string;
@@ -57,14 +98,23 @@ export interface LiveBroadcastRoomState {
   strikerName: string;
   strikerRuns: number;
   strikerBalls: number;
+  strikerFours?: number;
+  strikerSixes?: number;
   nonStrikerName: string;
   nonStrikerRuns: number;
   nonStrikerBalls: number;
+  nonStrikerFours?: number;
+  nonStrikerSixes?: number;
   bowlerName: string;
   bowlerWickets: number;
   bowlerRuns: number;
   bowlerOvers: string;
+  bowlerBalls?: number;
   thisOverBalls: string[]; // e.g. ['1', '4', '0', '6', 'W']
+  overHistory?: OverSummaryRecord[];
+  batsmanRecords?: Record<string, BatsmanLiveStat>;
+  bowlerRecords?: Record<string, BowlerLiveStat>;
+  fieldingRecords?: Record<string, FieldingLiveStat>;
   screenMode: BroadcastScreenMode;
   celebration: BroadcastCelebrationType;
   celebrationText: string;

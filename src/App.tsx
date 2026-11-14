@@ -111,6 +111,8 @@ const NAV_ITEMS: NavItem[] = [
 export default function App() {
   const [activeSection, setActiveSection] = useState<WorkspaceSection>('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(false);
+  const [desktopSidebarHidden, setDesktopSidebarHidden] = useState<boolean>(false);
+  const [isBrowserFullscreen, setIsBrowserFullscreen] = useState<boolean>(false);
 
   // Persistent State
   const [settings, setSettings] = useState<StudioSettings>(DEFAULT_SETTINGS);
@@ -457,14 +459,21 @@ export default function App() {
 
   return (
     <div className="min-h-screen w-full max-w-[100vw] overflow-x-hidden flex flex-col bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
-      {/* TOP BAR: Clean, zero-overflow mobile header */}
+      {/* TOP BAR: Clean, zero-overflow mobile & laptop header */}
       <header className="sticky top-0 z-30 h-14 flex items-center justify-between gap-2 px-3 sm:px-6 bg-[#0B192C] text-white border-b border-slate-800 shrink-0 w-full overflow-hidden">
         {/* Zone 1: Menu + Brand Title */}
         <div className="flex items-center gap-2 min-w-0">
           <button
-            onClick={() => setSidebarOpen(!sidebarOpen)}
+            onClick={() => {
+              if (window.innerWidth >= 1280) {
+                setDesktopSidebarHidden(!desktopSidebarHidden);
+              } else {
+                setSidebarOpen(!sidebarOpen);
+              }
+            }}
             className="p-2 rounded-lg text-slate-200 hover:bg-slate-800 cursor-pointer shrink-0"
             aria-label="Toggle Menu"
+            title="मेनू दिखाएं / छुपाएं (बड़ी स्क्रीन के लिए)"
           >
             <Menu className="w-5 h-5" />
           </button>
@@ -477,7 +486,7 @@ export default function App() {
         </div>
 
         {/* Zone 2: Desktop Navigation Links */}
-        <nav className="hidden lg:flex items-center gap-6 text-xs font-bold text-slate-200">
+        <nav className="hidden lg:flex items-center gap-5 text-xs font-bold text-slate-200">
           <button
             onClick={() => handleNavigate('dashboard')}
             className={`hover:text-amber-400 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
@@ -541,11 +550,50 @@ export default function App() {
           </button>
         </nav>
 
-        {/* Zone 3: Language Switch & Quick Profile Button */}
+        {/* Zone 3: Laptop Full-Screen Button, Profile & Language Switch */}
         <div className="flex items-center gap-1.5 shrink-0">
           <button
+            type="button"
+            onClick={() => {
+              if (!document.fullscreenElement) {
+                document.documentElement
+                  .requestFullscreen?.()
+                  .then(() => {
+                    setIsBrowserFullscreen(true);
+                    setDesktopSidebarHidden(true);
+                  })
+                  .catch(() => {
+                    setDesktopSidebarHidden(!desktopSidebarHidden);
+                  });
+              } else {
+                document
+                  .exitFullscreen?.()
+                  .then(() => {
+                    setIsBrowserFullscreen(false);
+                    setDesktopSidebarHidden(false);
+                  })
+                  .catch(() => {
+                    setDesktopSidebarHidden(false);
+                  });
+              }
+            }}
+            className={`hidden sm:flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-black cursor-pointer border transition-colors ${
+              isBrowserFullscreen || desktopSidebarHidden
+                ? 'bg-emerald-600 text-white border-emerald-400'
+                : 'bg-slate-800 hover:bg-slate-700 text-amber-300 border-slate-700'
+            }`}
+            title="लैपटॉप / बड़ी स्क्रीन फुल-स्क्रीन कंट्रोल व्यू"
+          >
+            <span>
+              {isBrowserFullscreen || desktopSidebarHidden
+                ? '🖥️ नॉर्मल व्यू'
+                : '🖥️ फुल-स्क्रीन (Laptop)'}
+            </span>
+          </button>
+
+          <button
             onClick={() => handleNavigate('tournament-profile')}
-            className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/30 text-amber-300 text-xs font-bold cursor-pointer"
+            className="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/30 text-amber-300 text-xs font-bold cursor-pointer"
           >
             <Shield className="w-3.5 h-3.5" />
             <span>{lang === 'hi' ? 'प्रोफाइल / लोगो' : 'Profile / Logo'}</span>
@@ -573,7 +621,7 @@ export default function App() {
         {sidebarOpen && (
           <div
             onClick={() => setSidebarOpen(false)}
-            className="fixed inset-0 z-40 bg-black/50 backdrop-blur-xs lg:hidden"
+            className="fixed inset-0 z-40 bg-black/50 backdrop-blur-xs xl:hidden"
           />
         )}
 
@@ -582,7 +630,9 @@ export default function App() {
           className={`${
             sidebarOpen
               ? 'fixed inset-y-0 left-0 z-50 flex w-72 max-w-[85vw]'
-              : 'hidden xl:flex w-64'
+              : desktopSidebarHidden
+              ? 'hidden'
+              : 'hidden xl:flex w-60'
           } flex-col bg-[#0B192C] text-slate-200 border-r border-slate-800 shrink-0 overflow-y-auto`}
         >
           <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800 xl:hidden">
