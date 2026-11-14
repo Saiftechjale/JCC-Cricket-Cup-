@@ -2,6 +2,7 @@ export type Language = 'hi' | 'en';
 
 export type WorkspaceSection =
   | 'dashboard'
+  | 'fb-live-studio'
   | 'tournament-profile'
   | 'poster-maker'
   | 'invitation-maker'
@@ -19,6 +20,74 @@ export type WorkspaceSection =
   | 'media-library'
   | 'backup-restore'
   | 'settings';
+
+export type BroadcastScreenMode =
+  | 'score-ticker'       // Clean non-overlapping bottom TV bar (85% camera area clear)
+  | 'squad-team-a'       // Show Batting Team 15-Player List on screen
+  | 'squad-team-b'       // Show Bowling Team 15-Player List on screen
+  | 'squad-vs-both'      // Show Both Teams (Team A vs Team B) Playing XI + Extra side-by-side
+  | 'full-sponsor-ad'    // Full-screen Local Market Sponsor Ad during Over/Drinks break
+  | 'match-summary';     // Match Toss / Target / Need X runs in Y balls card
+
+export type BroadcastCelebrationType =
+  | 'none'
+  | 'FOUR'
+  | 'SIX'
+  | 'WICKET'
+  | 'FIFTY'
+  | 'WIN';
+
+export interface LiveBroadcastRoomState {
+  roomId: string;
+  tournamentName: string;
+  seasonNumber: string;
+  venue: string;
+  matchStage: string;
+  battingTeamId: string;
+  battingTeamName: string;
+  bowlingTeamId: string;
+  bowlingTeamName: string;
+  runs: number;
+  wickets: number;
+  overs: number;
+  balls: number;
+  totalMatchOvers: number;
+  targetRuns: number; // 0 if 1st innings
+  tossOrStatusNote: string;
+  strikerName: string;
+  strikerRuns: number;
+  strikerBalls: number;
+  nonStrikerName: string;
+  nonStrikerRuns: number;
+  nonStrikerBalls: number;
+  bowlerName: string;
+  bowlerWickets: number;
+  bowlerRuns: number;
+  bowlerOvers: string;
+  thisOverBalls: string[]; // e.g. ['1', '4', '0', '6', 'W']
+  screenMode: BroadcastScreenMode;
+  celebration: BroadcastCelebrationType;
+  celebrationText: string;
+  celebrationTimestamp: number;
+  activeSponsorIndex: number;
+  autoRotateAds: boolean;
+  autoRotateSeconds: number;
+  showScoreboard: boolean;
+  showSponsorTicker: boolean;
+  showTopBadge: boolean;
+  customTickerMessage: string;
+  teamAPlayers: string[];
+  teamBPlayers: string[];
+  sponsorsList: {
+    id: string;
+    shopName: string;
+    ownerName: string;
+    address: string;
+    mobile: string;
+    tagline: string;
+  }[];
+  updatedAt: number;
+}
 
 export type TemplateCategory =
   | 'poster'

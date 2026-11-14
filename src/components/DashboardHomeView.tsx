@@ -17,6 +17,7 @@ import {
   Mail,
   Palette,
   PenTool,
+  Radio,
   ScrollText,
   Shield,
   Sparkles,
@@ -136,6 +137,15 @@ export const DashboardHomeView: React.FC<DashboardHomeViewProps> = ({
     accentClass: string;
   }[] = [
     {
+      section: 'fb-live-studio',
+      titleHi: '🔴 फेसबुक लाइव & 2-मोबाइल कंट्रोलर',
+      titleEn: '🔴 FB Live & 2-Mobile Studio',
+      descHi: 'बिना OBS के मोबाइल से लाइव चलाएं और दूसरे फोन से स्कोर, 15-खिलाड़ी सूची व ऑटो-विज्ञापन बदलें',
+      descEn: '2-Mobile real-time live score overlay, 15-player squad TV display & automatic rotating ads',
+      icon: Radio,
+      accentClass: 'bg-red-600 text-white animate-pulse',
+    },
+    {
       section: 'poster-maker',
       titleHi: 'पोस्टर और बैनर मेकर',
       titleEn: 'Poster & Banner Maker',
@@ -155,10 +165,10 @@ export const DashboardHomeView: React.FC<DashboardHomeViewProps> = ({
     },
     {
       section: 'player-list-maker',
-      titleHi: 'खिलाड़ी सूची व शपथ पत्र',
-      titleEn: 'Player List & Undertaking',
-      descHi: '15-खिलाड़ियों की सूची, टीम रजिस्ट्रेशन फॉर्म, Excel व PDF प्रिंट',
-      descEn: '15-player roster, team undertaking form, Excel & printable PDF',
+      titleHi: '8-टीम & 15-खिलाड़ी सूची मेकर',
+      titleEn: '8-Team & 15-Player List Maker',
+      descHi: '8 टीमों के 15-खिलाड़ियों के नाम, अलग-अलग डेली फेसबुक पोस्ट टेम्पलेट्स व प्रिंट फॉर्म',
+      descEn: '8-team 15-player rosters, daily Facebook post templates & printable form',
       icon: Users,
       accentClass: 'bg-emerald-600 text-white',
     },
@@ -483,10 +493,21 @@ export const DashboardHomeView: React.FC<DashboardHomeViewProps> = ({
             </div>
 
             {/* Action Buttons Row */}
-            <div className="grid grid-cols-2 sm:flex items-center gap-2 w-full">
+            <div className="grid grid-cols-1 sm:flex items-center gap-2 w-full">
+              <button
+                onClick={() => onNavigate('fb-live-studio')}
+                className="py-2.5 px-3.5 rounded-xl bg-red-600 hover:bg-red-500 text-white font-black text-xs transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-md border border-red-400"
+              >
+                <Radio className="w-3.5 h-3.5 shrink-0 animate-pulse" />
+                <span className="truncate">
+                  {lang === 'hi'
+                    ? '🔴 FB Live 2-मोबाइल स्टूडियो'
+                    : '🔴 FB Live 2-Mobile Studio'}
+                </span>
+              </button>
               <button
                 onClick={() => onOpenTemplateInEditor(templates[0])}
-                className="col-span-1 py-2.5 px-3 sm:px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-md"
+                className="py-2.5 px-3 sm:px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-md"
               >
                 <Palette className="w-3.5 h-3.5 shrink-0" />
                 <span className="truncate">
@@ -495,7 +516,7 @@ export const DashboardHomeView: React.FC<DashboardHomeViewProps> = ({
               </button>
               <button
                 onClick={() => onNavigate('tournament-profile')}
-                className="col-span-1 py-2.5 px-3 sm:px-4 rounded-xl bg-white/15 hover:bg-white/25 text-white font-bold text-xs border border-white/25 transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                className="py-2.5 px-3 sm:px-4 rounded-xl bg-white/15 hover:bg-white/25 text-white font-bold text-xs border border-white/25 transition-all cursor-pointer flex items-center justify-center gap-1.5"
               >
                 <Edit3 className="w-3.5 h-3.5 shrink-0" />
                 <span className="truncate">

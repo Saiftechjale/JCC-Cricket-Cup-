@@ -20,6 +20,7 @@ import {
   Mail,
   Menu,
   Palette,
+  Radio,
   ScrollText,
   Settings,
   Shield,
@@ -29,6 +30,7 @@ import {
 } from 'lucide-react';
 import { CanvasEditor } from './components/CanvasEditor';
 import { DashboardHomeView } from './components/DashboardHomeView';
+import { FBLiveBroadcastStudioView } from './components/FBLiveBroadcastStudioView';
 import { HDExportModal } from './components/HDExportModal';
 import {
   BackupRestoreView,
@@ -86,6 +88,7 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { id: 'dashboard', labelHi: '1. डैशबोर्ड (Dashboard)', labelEn: '1. Dashboard', icon: Home },
+  { id: 'fb-live-studio', labelHi: '🔴 FB Live & 2-मोबाइल स्टूडियो', labelEn: '🔴 FB Live 2-Mobile Studio', icon: Radio },
   { id: 'tournament-profile', labelHi: '2. टूर्नामेंट प्रोफाइल', labelEn: '2. Tournament Profile', icon: Shield },
   { id: 'poster-maker', labelHi: '3. पोस्टर और बैनर मेकर', labelEn: '3. Poster & Banner Maker', icon: Palette, category: 'poster' },
   { id: 'invitation-maker', labelHi: '4. आमंत्रण कार्ड मेकर', labelEn: '4. Invitation Card Maker', icon: Mail, category: 'invitation' },
@@ -150,14 +153,31 @@ export default function App() {
     });
   }, []);
 
-  // Sync Dark Mode class on <html>
+  // Detect PRISM Live / CameraFi Web Overlay URL Mode (?liveOverlay=1&room=JALE-2026)
+  const overlayParams = useMemo(() => {
+    if (typeof window === 'undefined') {
+      return { isOverlay: false, room: 'JALE-2026' };
+    }
+    const sp = new URLSearchParams(window.location.search);
+    return {
+      isOverlay: sp.get('liveOverlay') === '1',
+      room: (sp.get('room') || 'JALE-2026').toUpperCase(),
+    };
+  }, []);
+
+  // Sync Dark Mode class on <html> (or transparent background in Web Overlay mode)
   useEffect(() => {
+    if (overlayParams.isOverlay) {
+      document.documentElement.style.background = 'transparent';
+      document.body.style.background = 'transparent';
+      return;
+    }
     if (settings.darkMode) {
       document.documentElement.classList.add('dark');
     } else {
       document.documentElement.classList.remove('dark');
     }
-  }, [settings.darkMode]);
+  }, [settings.darkMode, overlayParams.isOverlay]);
 
   // Android / Browser Back Button support
   useEffect(() => {
@@ -421,6 +441,20 @@ export default function App() {
     mediaLibrary,
   };
 
+  if (overlayParams.isOverlay) {
+    return (
+      <FBLiveBroadcastStudioView
+        lang={lang}
+        activeProfile={activeProfile}
+        teams={teams}
+        sponsors={sponsors}
+        templates={allTemplates}
+        overlayOnly={true}
+        initialRoomId={overlayParams.room}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen w-full max-w-[100vw] overflow-x-hidden flex flex-col bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
       {/* TOP BAR: Clean, zero-overflow mobile header */}
@@ -485,6 +519,17 @@ export default function App() {
             {lang === 'hi' ? '8-टीम & 15-खिलाड़ी' : '8 Teams & Players'}
           </button>
           <button
+            onClick={() => handleNavigate('fb-live-studio')}
+            className={`flex items-center gap-1 px-2.5 py-1 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+              activeSection === 'fb-live-studio'
+                ? 'bg-red-600 text-white font-black'
+                : 'bg-red-600/20 text-red-300 hover:bg-red-600 hover:text-white border border-red-500/40'
+            }`}
+          >
+            <Radio className="w-3.5 h-3.5 animate-pulse" />
+            <span>{lang === 'hi' ? '🔴 FB Live स्टूडियो' : '🔴 FB Live Studio'}</span>
+          </button>
+          <button
             onClick={() => handleNavigate('schedule-maker')}
             className={`hover:text-amber-400 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
               activeSection === 'schedule-maker'
@@ -492,7 +537,7 @@ export default function App() {
                 : ''
             }`}
           >
-            {lang === 'hi' ? 'FB Live / अखबार / प्रचार' : 'FB Live & News'}
+            {lang === 'hi' ? 'शेड्यूल / अखबार / प्रचार' : 'Schedule & News'}
           </button>
         </nav>
 
@@ -593,6 +638,17 @@ export default function App() {
               onQuickUpdateProfile={handleQuickUpdateProfile}
               onNavigate={handleNavigate}
               onOpenTemplateInEditor={handleOpenTemplateInEditor}
+            />
+          )}
+
+          {activeSection === 'fb-live-studio' && (
+            <FBLiveBroadcastStudioView
+              lang={lang}
+              activeProfile={activeProfile}
+              teams={teams}
+              sponsors={sponsors}
+              templates={allTemplates}
+              onSaveSponsors={handleSaveSponsors}
             />
           )}
 
@@ -726,10 +782,10 @@ export default function App() {
         <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-30 h-14 bg-[#0B192C]/95 backdrop-blur-md border-t border-slate-800 grid grid-cols-5 items-center text-slate-300">
           {[
             { id: 'dashboard', icon: Home, labelHi: 'होम', labelEn: 'Home' },
-            { id: 'poster-maker', icon: Palette, labelHi: 'एडिटर', labelEn: 'Editor' },
+            { id: 'fb-live-studio', icon: Radio, labelHi: '🔴 FB Live', labelEn: '🔴 FB Live' },
             { id: 'player-list-maker', icon: Users, labelHi: '8-टीम/खिलाड़ी', labelEn: '8 Teams' },
-            { id: 'schedule-maker', icon: Calendar, labelHi: 'FB Live/न्यूज़', labelEn: 'Live/News' },
-            { id: 'template-library', icon: LayoutTemplate, labelHi: 'टेम्पलेट', labelEn: 'Templates' },
+            { id: 'schedule-maker', icon: Calendar, labelHi: 'शेड्यूल/अखबार', labelEn: 'Matches' },
+            { id: 'poster-maker', icon: Palette, labelHi: 'एडिटर', labelEn: 'Editor' },
           ].map((tab) => {
             const Icon = tab.icon;
             const active = activeSection === tab.id;
