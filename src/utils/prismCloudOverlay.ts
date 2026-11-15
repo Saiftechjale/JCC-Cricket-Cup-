@@ -608,11 +608,13 @@ export function buildStandalonePrismOverlayHtml(
 </html>`;
 }
 
+export const DEFAULT_GITHUB_REPO = 'Saiftechjale/JCC-Cricket-Cup-';
+
 /**
  * Cleans any GitHub URL or "user/repo" string into a clean "username/reponame" slug.
  */
 export function cleanGitHubRepoSlug(input?: string): string {
-  if (!input) return '';
+  if (!input) return DEFAULT_GITHUB_REPO;
   let s = input.trim();
   s = s.replace(/^https?:\/\/(www\.)?github\.com\//i, '');
   s = s.replace(/\.git$/i, '');
@@ -620,7 +622,7 @@ export function cleanGitHubRepoSlug(input?: string): string {
   if (parts.length >= 2) {
     return `${parts[0]}/${parts[1]}`;
   }
-  return '';
+  return DEFAULT_GITHUB_REPO;
 }
 
 /**
@@ -630,7 +632,7 @@ export function cleanGitHubRepoSlug(input?: string): string {
 export function getPermanentGitHubWidgetUrl(
   repoSlugInput?: string,
   branch = 'main'
-): string | null {
+): string {
   const envRepo =
     (typeof import.meta !== 'undefined' &&
       (import.meta as unknown as { env?: Record<string, string> }).env
@@ -642,71 +644,20 @@ export function getPermanentGitHubWidgetUrl(
         ?.VITE_GITHUB_BRANCH) ||
     branch;
 
-  const savedRepo =
-    typeof localStorage !== 'undefined'
-      ? localStorage.getItem('jale_github_repo_slug') || ''
-      : '';
-
-  const slug = cleanGitHubRepoSlug(repoSlugInput || savedRepo || envRepo);
-  if (!slug) return null;
-
+  const slug = cleanGitHubRepoSlug(repoSlugInput || envRepo || DEFAULT_GITHUB_REPO);
   return `https://htmlpreview.github.io/?https://raw.githubusercontent.com/${slug}/${envBranch}/public/live-overlay.html`;
 }
 
 /**
- * Uploads the standalone PRISM Live HTML overlay to ntfy.sh and returns a 100% public,
- * zero-auth HTTP 200 URL via htmlpreview.github.io that works inside PRISM Live Studio's Web Widget.
- * If a valid public GitHub repository slug is available and reachable, returns the Lifetime Permanent GitHub URL!
+ * Returns the 100% Lifetime Permanent GitHub PRISM Live URL and syncs state to cloud.
  */
 export async function generatePublicPrismWidgetUrl(
   roomId: string,
   state: LiveBroadcastRoomState,
   customRepoSlug?: string
 ): Promise<string> {
-  // First push the latest state to the sync topic
-  await pushStateToPublicCloud(roomId, state);
-
-  // Check if Permanent GitHub URL is configured & reachable
-  const permUrl = getPermanentGitHubWidgetUrl(customRepoSlug);
-  if (permUrl) {
-    const rawTarget = permUrl.replace('https://htmlpreview.github.io/?', '');
-    try {
-      const checkRes = await fetch(rawTarget, { method: 'HEAD' });
-      if (checkRes.ok) {
-        return permUrl;
-      }
-      // Try master branch fallback
-      const masterRaw = rawTarget.replace('/main/public/', '/master/public/');
-      const checkMaster = await fetch(masterRaw, { method: 'HEAD' });
-      if (checkMaster.ok) {
-        return `https://htmlpreview.github.io/?${masterRaw}`;
-      }
-    } catch {
-      // fall through to instant cloud upload
-    }
-  }
-
-  const pageTopic = getPageTopicName(roomId);
-  const htmlContent = buildStandalonePrismOverlayHtml(roomId, state);
-
-  const response = await fetch(`https://ntfy.sh/${pageTopic}`, {
-    method: 'POST',
-    headers: {
-      Filename: 'jale-live-overlay.html',
-    },
-    body: htmlContent,
-  });
-
-  if (!response.ok) {
-    throw new Error('Failed to publish public overlay page');
-  }
-
-  const data = await response.json();
-  const fileUrl = data?.attachment?.url;
-  if (!fileUrl) {
-    throw new Error('No attachment URL returned');
-  }
-
-  return `https://htmlpreview.github.io/?${fileUrl}`;
+  pushStateToPublicCloud(roomId, state).catch(() => {});
+  return getPermanentGitHubWidgetUrl(customRepoSlug);
 }
+
 

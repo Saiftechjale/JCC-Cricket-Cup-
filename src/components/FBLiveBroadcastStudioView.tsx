@@ -885,19 +885,9 @@ export const FBLiveBroadcastStudioView: React.FC<
   const [toast, setToast] = useState<string | null>(null);
   const [fullscreenMonitor, setFullscreenMonitor] = useState<boolean>(false);
   const [laptopFullControl, setLaptopFullControl] = useState<boolean>(false);
-  const [prismWidgetUrl, setPrismWidgetUrl] = useState<string>('');
-  const [generatingPrismLink, setGeneratingPrismLink] = useState<boolean>(false);
-  const [githubRepoSlug, setGithubRepoSlug] = useState<string>(() => {
-    try {
-      const saved = localStorage.getItem('jale_github_repo_slug');
-      if (saved) return cleanGitHubRepoSlug(saved);
-    } catch {
-      // ignore
-    }
-    const envRepo = (import.meta as unknown as { env?: Record<string, string> })
-      .env?.VITE_GITHUB_REPO;
-    return cleanGitHubRepoSlug(envRepo || '');
-  });
+  const [prismWidgetUrl, setPrismWidgetUrl] = useState<string>(() =>
+    getPermanentGitHubWidgetUrl()
+  );
   const [showNoBallSubMenu, setShowNoBallSubMenu] = useState<boolean>(false);
 
   // Automatic Wicket -> Next Batsman & Fielding Credit prompt
@@ -1228,27 +1218,14 @@ export const FBLiveBroadcastStudioView: React.FC<
     };
   }, [roomId]);
 
-  // Automatically generate a 100% Public HTTP-200 PRISM Live Widget URL on startup / room change
+  // Always set the 100% Permanent GitHub PRISM Live URL and sync state
   useEffect(() => {
     if (overlayOnly) return;
-    const cacheKey = `jale_prism_widget_url_${roomId}`;
-    const cached = localStorage.getItem(cacheKey);
-    if (cached && cached.startsWith('https://htmlpreview.github.io/')) {
-      setPrismWidgetUrl(cached);
-    }
-    setGeneratingPrismLink(true);
+    const permUrl = getPermanentGitHubWidgetUrl();
+    setPrismWidgetUrl(permUrl);
     generatePublicPrismWidgetUrl(roomId, liveState)
-      .then((url) => {
-        setPrismWidgetUrl(url);
-        setSyncConnected(true);
-        try {
-          localStorage.setItem(cacheKey, url);
-        } catch {
-          // ignore
-        }
-      })
-      .catch(() => {})
-      .finally(() => setGeneratingPrismLink(false));
+      .then(() => setSyncConnected(true))
+      .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId, overlayOnly]);
 
@@ -1978,28 +1955,26 @@ export const FBLiveBroadcastStudioView: React.FC<
   ]);
 
   const overlayUrl = useMemo(() => {
-    if (prismWidgetUrl) return prismWidgetUrl;
-    const base = getPublicShareOrigin();
-    return `${base}/?liveOverlay=1&room=${encodeURIComponent(roomId)}`;
-  }, [prismWidgetUrl, roomId]);
+    return prismWidgetUrl || getPermanentGitHubWidgetUrl();
+  }, [prismWidgetUrl]);
 
   const handleCopyPrismLink = async () => {
+    const permUrl = getPermanentGitHubWidgetUrl();
+    setPrismWidgetUrl(permUrl);
     try {
-      setGeneratingPrismLink(true);
-      const freshUrl =
-        prismWidgetUrl ||
-        (await generatePublicPrismWidgetUrl(roomId, liveState));
-      setPrismWidgetUrl(freshUrl);
       await pushStateToPublicCloud(roomId, liveState);
-      await navigator.clipboard?.writeText(freshUrl);
+      await navigator.clipboard?.writeText(permUrl);
       triggerToast(
-        '✓ 100% Working पब्लिक PRISM Live लिंक कॉपी हो गया! अब PRISM Live -> Web में पेस्ट करें।'
+        t3(
+          lang,
+          '✓ परमानेंट PRISM Live लिंक कॉपी हो गया!',
+          '✓ Permanent PRISM Live Link Copied!',
+          '✓ Permanent PRISM Live लिंक कॉपी हो गया!'
+        )
       );
     } catch {
-      navigator.clipboard?.writeText(overlayUrl);
-      triggerToast('✓ PRISM Live लिंक कॉपी हो गया!');
-    } finally {
-      setGeneratingPrismLink(false);
+      navigator.clipboard?.writeText(permUrl);
+      triggerToast('✓ PRISM Live Link Copied!');
     }
   };
 
@@ -2044,59 +2019,48 @@ export const FBLiveBroadcastStudioView: React.FC<
       )}
 
       {/* =====================================================================
-          TOP BAR: ROOM CODE + 100% PUBLIC PRISM LIVE LINK + LAPTOP FULL-SCREEN
+          TOP BAR: CLEAN SINGLE PERMANENT PRISM LINK + ROOM CODE + FULLSCREEN
       ===================================================================== */}
-      <div className="rounded-2xl bg-[#0B192C] text-white p-3.5 sm:p-4 border-2 border-amber-500/60 shadow-lg space-y-3">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-          <div className="space-y-0.5">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-red-600 text-white text-[10px] font-black uppercase">
-                <Radio className="w-3 h-3 animate-pulse" />
-                Mobile + Laptop Live Studio
-              </span>
-              <span className="text-xs font-bold text-emerald-400">
-                {syncConnected
-                  ? '● पब्लिक क्लाउड सिंक चालू है (PRISM Live Ready)'
-                  : '● लाइव सिंक कनेक्ट हो रहा है...'}
-              </span>
-            </div>
-            <h1 className="text-sm sm:text-xl font-black text-amber-400">
-              🔴 फेसबुक लाइव रिमोट स्कोरर, ऑटो-अवार्ड्स & विज्ञापन कंट्रोल रूम
+      <div className="rounded-2xl bg-[#0B192C] text-white p-3.5 border-2 border-amber-500/60 shadow-lg space-y-2.5">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-red-600 text-white text-[10px] font-black uppercase">
+              <Radio className="w-3 h-3 animate-pulse" />
+              LIVE STUDIO
+            </span>
+            <h1 className="text-sm sm:text-base font-black text-amber-400">
+              {t3(
+                lang,
+                'फेसबुक लाइव स्कोरर व कंट्रोल रूम',
+                'FB Live Scorer & Control Room',
+                'FB Live स्कोरर & कंट्रोल रूम'
+              )}
             </h1>
+            <span className="text-[11px] font-bold text-emerald-400">
+              {syncConnected ? '● Connected' : '● Syncing...'}
+            </span>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <div className="flex items-center gap-1.5 bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-700">
-              <span className="text-[11px] font-bold text-slate-400">कोड:</span>
+            <div className="flex items-center gap-1.5 bg-slate-900 px-2.5 py-1.5 rounded-xl border border-slate-700">
+              <span className="text-[11px] font-bold text-slate-400">
+                {t3(lang, 'कोड:', 'Room:', 'कोड:')}
+              </span>
               <input
                 type="text"
                 value={roomId}
                 onChange={(e) => setRoomId(e.target.value.toUpperCase())}
-                className="w-24 bg-transparent text-amber-300 font-mono font-black text-xs uppercase focus:outline-none"
+                className="w-20 bg-transparent text-amber-300 font-mono font-black text-xs uppercase focus:outline-none"
               />
             </div>
 
             <button
               type="button"
-              onClick={handleCopyPrismLink}
-              disabled={generatingPrismLink}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs cursor-pointer shadow-sm"
-            >
-              <Copy className="w-3.5 h-3.5" />
-              <span>
-                {generatingPrismLink
-                  ? 'लिंक बन रहा है...'
-                  : 'कैमरा फोन (PRISM Live) पब्लिक लिंक कॉपी करें'}
-              </span>
-            </button>
-
-            <button
-              type="button"
               onClick={() => setFullscreenMonitor(true)}
-              className="flex items-center gap-1 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs cursor-pointer border border-slate-700"
+              className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs cursor-pointer border border-slate-700"
             >
               <Eye className="w-3.5 h-3.5" />
-              <span>टीवी प्रिव्यू फुल स्क्रीन</span>
+              <span>{t3(lang, 'टीवी प्रिव्यू', 'TV Preview', 'TV प्रिव्यू')}</span>
             </button>
 
             <button
@@ -2112,7 +2076,7 @@ export const FBLiveBroadcastStudioView: React.FC<
                   document.exitFullscreen?.().catch(() => {});
                 }
               }}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-xl font-black text-xs cursor-pointer border transition-colors ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-black text-xs cursor-pointer border transition-colors ${
                 laptopFullControl
                   ? 'bg-red-600 text-white border-red-400'
                   : 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-400'
@@ -2121,188 +2085,70 @@ export const FBLiveBroadcastStudioView: React.FC<
               {laptopFullControl ? (
                 <>
                   <Minimize2 className="w-3.5 h-3.5" />
-                  <span>लैपटॉप फुल-स्क्रीन बंद करें</span>
+                  <span>{t3(lang, 'फुल-स्क्रीन बंद', 'Exit Fullscreen', 'Full Screen बंद')}</span>
                 </>
               ) : (
                 <>
                   <Maximize2 className="w-3.5 h-3.5" />
-                  <span>🖥️ लैपटॉप / बड़ी स्क्रीन फुल कंट्रोल</span>
+                  <span>{t3(lang, 'लैपटॉप फुल स्क्रीन', 'Full Screen', 'लैपटॉप Full Screen')}</span>
                 </>
               )}
             </button>
           </div>
         </div>
 
-        {/* PUBLIC PRISM LIVE LINK BOX + LIFETIME PERMANENT GITHUB LINK */}
-        <div className="bg-slate-900/95 rounded-xl p-3 border border-emerald-500/40 space-y-2.5">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <span className="text-[11px] font-black text-emerald-400">
-              {t3(
-                lang,
-                '✅ PRISM Live वेब लिंक (इंस्टेंट क्लाउड + ♾️ लाइफटाइम परमानेंट GitHub लिंक):',
-                '✅ PRISM Live Web Link (Instant Cloud + ♾️ Lifetime Permanent GitHub Link):',
-                '✅ PRISM Live Web लिंक (Instant Cloud + ♾️ Lifetime Permanent GitHub लिंक):'
-              )}
-            </span>
-            <button
-              type="button"
-              onClick={async () => {
-                setGeneratingPrismLink(true);
-                try {
-                  const fresh = await generatePublicPrismWidgetUrl(
-                    roomId,
-                    liveState,
-                    githubRepoSlug
-                  );
-                  setPrismWidgetUrl(fresh);
-                  localStorage.setItem(`jale_prism_widget_url_${roomId}`, fresh);
-                  await navigator.clipboard?.writeText(fresh);
-                  triggerToast('✓ नया पब्लिक PRISM लिंक जनरेट और कॉपी हो गया!');
-                } catch {
-                  // ignore
-                } finally {
-                  setGeneratingPrismLink(false);
-                }
-              }}
-              className="text-[10px] font-black text-amber-300 underline cursor-pointer"
-            >
-              {t3(lang, '🔄 लिंक रिफ्रेश करें', '🔄 Refresh Link', '🔄 लिंक Refresh करें')}
-            </button>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <input
-              type="text"
-              readOnly
-              value={overlayUrl}
-              onClick={(e) => (e.target as HTMLInputElement).select()}
-              className="flex-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-amber-300 font-mono text-xs"
-            />
-            <button
-              type="button"
-              onClick={handleCopyPrismLink}
-              className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs cursor-pointer shrink-0"
-            >
-              {t3(lang, '📋 लिंक कॉपी करें', '📋 Copy Link', '📋 Copy लिंक')}
-            </button>
-          </div>
-
-          {/* LIFETIME PERMANENT GITHUB REPO CONNECTION BAR */}
-          <div className="bg-slate-950/90 rounded-lg p-2.5 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-            <div className="space-y-0.5">
-              <div className="text-[11px] font-black text-amber-300">
-                {t3(
-                  lang,
-                  '♾️ लाइफटाइम नॉन-एक्सपायरिंग GitHub लिंक (कभी एक्सपायर नहीं होगा):',
-                  '♾️ Lifetime Non-Expiring GitHub Link (Never Expires):',
-                  '♾️ Lifetime परमानेंट GitHub लिंक (कभी Expire नहीं होगा):'
-                )}
-              </div>
-              <div className="text-[10px] font-bold text-slate-400">
-                {githubRepoSlug
-                  ? `Connected Repo: ${githubRepoSlug} (public/live-overlay.html)`
-                  : t3(
-                      lang,
-                      'अपना GitHub यूजरनेम/रिपॉजिटरी लिखें (जैसे: username/jale-cricket) — या GitHub APK बिल्ड में यह अपने-आप जुड़ जाएगा:',
-                      'Enter your GitHub username/repo (e.g. username/jale-cricket) — auto-detected in GitHub APK build:',
-                      'अपना GitHub username/repo डालें (जैसे: username/jale-cricket) — GitHub APK में ऑटोमैटिक जुड़ जाता है:'
-                    )}
-              </div>
-            </div>
-            <div className="flex items-center gap-1.5 shrink-0">
-              <input
-                type="text"
-                value={githubRepoSlug}
-                onChange={(e) => setGithubRepoSlug(e.target.value)}
-                placeholder="username/repo-name"
-                className="w-44 sm:w-52 px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-700 text-white font-mono text-xs"
-              />
-              <button
-                type="button"
-                onClick={() => {
-                  const cleanSlug = cleanGitHubRepoSlug(githubRepoSlug);
-                  setGithubRepoSlug(cleanSlug);
-                  try {
-                    localStorage.setItem('jale_github_repo_slug', cleanSlug);
-                  } catch {
-                    // ignore
-                  }
-                  if (cleanSlug) {
-                    const permUrl = getPermanentGitHubWidgetUrl(
-                      roomId,
-                      cleanSlug
-                    );
-                    if (permUrl) {
-                      setPrismWidgetUrl(permUrl);
-                      navigator.clipboard?.writeText(permUrl);
-                      triggerToast(
-                        '♾️ लाइफटाइम परमानेंट GitHub लिंक सेट और कॉपी हो गया!'
-                      );
-                    }
-                  } else {
-                    triggerToast('कृपया सही username/repo लिखें');
-                  }
-                }}
-                className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-[11px] cursor-pointer whitespace-nowrap"
-              >
-                {t3(lang, '♾️ परमानेंट लिंक बनाएं', '♾️ Set Permanent', '♾️ Permanent सेट करें')}
-              </button>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px] font-bold text-slate-200 pt-0.5">
-            <div className="bg-slate-800/80 px-2.5 py-1.5 rounded-lg border border-white/10">
-              <span className="text-amber-400 font-black">स्टेप 1:</span> PRISM
-              Live में <b>Widget ➔ 🌐 Web</b> चुनें और ऊपर वाला लिंक पेस्ट करें।
-            </div>
-            <div className="bg-slate-800/80 px-2.5 py-1.5 rounded-lg border border-white/10">
-              <span className="text-amber-400 font-black">स्टेप 2:</span> स्क्रीन
-              पर जो बॉक्स आएगा, उसके <b>नीचे-दाएं कोने वाले [ ⛶ ] बटन</b> को दबाकर{' '}
-              <b>Full Screen</b> कर लें।
-            </div>
-            <div className="bg-slate-800/80 px-2.5 py-1.5 rounded-lg border border-white/10">
-              <span className="text-amber-400 font-black">स्टेप 3:</span> बॉक्स
-              के <b>ऊपर-बाएं कोने में ताले 🔒 (Lock)</b> पर टैप करें — अब दूसरे
-              फोन से स्कोर दबाएं, तुरंत बदलेगा!
-            </div>
-          </div>
+        {/* SINGLE PERMANENT PRISM LIVE LINK BAR (ONLY ONE LINK & ONE COPY BUTTON!) */}
+        <div className="flex items-center gap-2 bg-slate-950/90 p-2 rounded-xl border border-emerald-500/40">
+          <span className="text-[11px] font-black text-emerald-400 shrink-0 hidden sm:inline">
+            {t3(lang, '♾️ PRISM लिंक:', '♾️ PRISM Link:', '♾️ PRISM लिंक:')}
+          </span>
+          <input
+            type="text"
+            readOnly
+            value={overlayUrl}
+            onClick={(e) => (e.target as HTMLInputElement).select()}
+            className="flex-1 px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-amber-300 font-mono text-xs"
+          />
+          <button
+            type="button"
+            onClick={handleCopyPrismLink}
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs cursor-pointer shrink-0 shadow-xs"
+          >
+            <Copy className="w-3.5 h-3.5" />
+            <span>{t3(lang, 'लिंक कॉपी करें', 'Copy Link', 'Copy लिंक')}</span>
+          </button>
         </div>
       </div>
 
       {/* =====================================================================
-          STEP 1: 3 SIMPLE ON/OFF TOGGLE SWITCHES (SHOW / HIDE SCORE & ADS ANYTIME)
+          3 SIMPLE ON/OFF TOGGLE SWITCHES
       ===================================================================== */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
         {/* Toggle 1: Live Scoreboard ON/OFF */}
         <button
           type="button"
           onClick={() => {
             const nextVal = !(liveState.showScoreboard !== false);
             pushLiveState({ ...liveState, showScoreboard: nextVal });
-            triggerToast(
-              nextVal
-                ? '✓ लाइव स्कोरबोर्ड स्क्रीन पर चालू (ON) हो गया!'
-                : '✓ लाइव स्कोरबोर्ड छुपा दिया गया (OFF) — स्क्रीन अब बिल्कुल साफ है!'
-            );
           }}
-          className={`p-3 rounded-2xl border-2 flex items-center justify-between transition-all cursor-pointer ${
+          className={`p-2.5 rounded-2xl border-2 flex items-center justify-between transition-all cursor-pointer ${
             liveState.showScoreboard !== false
-              ? 'bg-emerald-600 text-white border-emerald-300 shadow-md'
+              ? 'bg-emerald-600 text-white border-emerald-300 shadow-sm'
               : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-800'
           }`}
         >
           <div className="text-left">
             <div className="text-xs font-black uppercase">
-              1. लाइव स्कोर पट्टी (Scoreboard)
+              {t3(lang, '1. स्कोरबोर्ड', '1. Scoreboard', '1. स्कोरबोर्ड (Scoreboard)')}
             </div>
-            <div className="text-[11px] font-bold opacity-90 mt-0.5">
+            <div className="text-[10px] font-bold opacity-90">
               {liveState.showScoreboard !== false
-                ? 'अभी स्क्रीन पर दिख रहा है (ON)'
-                : 'अभी बंद है / छुपा हुआ है (OFF)'}
+                ? t3(lang, 'चालू (ON)', 'Visible (ON)', 'चालू (ON)')
+                : t3(lang, 'बंद (OFF)', 'Hidden (OFF)', 'बंद (OFF)')}
             </div>
           </div>
           <div
-            className={`w-14 h-7 rounded-full p-1 transition-colors flex items-center shrink-0 ${
+            className={`w-12 h-6 rounded-full p-0.5 transition-colors flex items-center shrink-0 ${
               liveState.showScoreboard !== false
                 ? 'bg-slate-950/40 justify-end'
                 : 'bg-slate-300 dark:bg-slate-700 justify-start'
@@ -2318,30 +2164,25 @@ export const FBLiveBroadcastStudioView: React.FC<
           onClick={() => {
             const nextVal = !liveState.showSponsorTicker;
             pushLiveState({ ...liveState, showSponsorTicker: nextVal });
-            triggerToast(
-              nextVal
-                ? '✓ दुकान विज्ञापन पट्टी चालू (ON) हो गई!'
-                : '✓ दुकान विज्ञापन पट्टी बंद (OFF) कर दी गई!'
-            );
           }}
-          className={`p-3 rounded-2xl border-2 flex items-center justify-between transition-all cursor-pointer ${
+          className={`p-2.5 rounded-2xl border-2 flex items-center justify-between transition-all cursor-pointer ${
             liveState.showSponsorTicker
-              ? 'bg-amber-500 text-slate-950 border-amber-300 shadow-md'
+              ? 'bg-amber-500 text-slate-950 border-amber-300 shadow-sm'
               : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-800'
           }`}
         >
           <div className="text-left">
             <div className="text-xs font-black uppercase">
-              2. दुकान विज्ञापन पट्टी (Ads Bar)
+              {t3(lang, '2. विज्ञापन पट्टी', '2. Sponsor Ads Bar', '2. विज्ञापन पट्टी (Ads)')}
             </div>
-            <div className="text-[11px] font-bold opacity-90 mt-0.5">
+            <div className="text-[10px] font-bold opacity-90">
               {liveState.showSponsorTicker
-                ? 'विज्ञापन दिख रहा है (ON)'
-                : 'विज्ञापन बंद है (OFF)'}
+                ? t3(lang, 'चालू (ON)', 'Visible (ON)', 'चालू (ON)')
+                : t3(lang, 'बंद (OFF)', 'Hidden (OFF)', 'बंद (OFF)')}
             </div>
           </div>
           <div
-            className={`w-14 h-7 rounded-full p-1 transition-colors flex items-center shrink-0 ${
+            className={`w-12 h-6 rounded-full p-0.5 transition-colors flex items-center shrink-0 ${
               liveState.showSponsorTicker
                 ? 'bg-slate-950/40 justify-end'
                 : 'bg-slate-300 dark:bg-slate-700 justify-start'
@@ -2357,30 +2198,25 @@ export const FBLiveBroadcastStudioView: React.FC<
           onClick={() => {
             const nextVal = !liveState.autoRotateAds;
             pushLiveState({ ...liveState, autoRotateAds: nextVal });
-            triggerToast(
-              nextVal
-                ? '✓ ऑटोमैटिक विज्ञापन रोटेशन चालू (हर 20 सेकंड में दुकान बदलेगी)!'
-                : '✓ ऑटोमैटिक विज्ञापन बदलना बंद किया गया।'
-            );
           }}
-          className={`p-3 rounded-2xl border-2 flex items-center justify-between transition-all cursor-pointer ${
+          className={`p-2.5 rounded-2xl border-2 flex items-center justify-between transition-all cursor-pointer ${
             liveState.autoRotateAds
-              ? 'bg-blue-600 text-white border-blue-300 shadow-md'
+              ? 'bg-blue-600 text-white border-blue-300 shadow-sm'
               : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-800'
           }`}
         >
           <div className="text-left">
             <div className="text-xs font-black uppercase">
-              3. ऑटोमैटिक विज्ञापन (Auto Ads)
+              {t3(lang, '3. ऑटो विज्ञापन', '3. Auto Rotate Ads', '3. ऑटो विज्ञापन (Auto Ads)')}
             </div>
-            <div className="text-[11px] font-bold opacity-90 mt-0.5">
+            <div className="text-[10px] font-bold opacity-90">
               {liveState.autoRotateAds
-                ? `हर ${liveState.autoRotateSeconds}s में अपने-आप बदलेगा (ON)`
-                : 'मैनुअल मोड (OFF)'}
+                ? t3(lang, `हर ${liveState.autoRotateSeconds}s में (ON)`, `Every ${liveState.autoRotateSeconds}s (ON)`, `हर ${liveState.autoRotateSeconds}s में (ON)`)
+                : t3(lang, 'बंद (OFF)', 'Manual (OFF)', 'बंद (OFF)')}
             </div>
           </div>
           <div
-            className={`w-14 h-7 rounded-full p-1 transition-colors flex items-center shrink-0 ${
+            className={`w-12 h-6 rounded-full p-0.5 transition-colors flex items-center shrink-0 ${
               liveState.autoRotateAds
                 ? 'bg-slate-950/40 justify-end'
                 : 'bg-slate-300 dark:bg-slate-700 justify-start'
@@ -2426,7 +2262,9 @@ export const FBLiveBroadcastStudioView: React.FC<
                 className="flex items-center gap-1.5 px-4 py-3 rounded-2xl bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-slate-950 font-black text-xs sm:text-sm cursor-pointer shadow-lg active:scale-95"
               >
                 <Undo2 className="w-4 h-4 stroke-[3]" />
-                <span>गलती सुधारें / पिछली गेंद हटाएं (UNDO)</span>
+                <span>
+                  {t3(lang, 'पिछली गेंद हटाएं', 'Undo Ball', 'गलती सुधारें (UNDO)')}
+                </span>
               </button>
             </div>
 
@@ -2437,28 +2275,30 @@ export const FBLiveBroadcastStudioView: React.FC<
               <div className="p-3.5 rounded-2xl bg-amber-400 text-slate-950 space-y-3 shadow-xl border-2 border-white">
                 <div className="flex items-center justify-between border-b border-slate-950/15 pb-1.5">
                   <span className="text-xs sm:text-sm font-black uppercase">
-                    🎯 विकेट गिरा! (1) कैच/कीपिंग चुनें और (2) अगला नया बल्लेबाज चुनें:
+                    {t3(
+                      lang,
+                      '🎯 विकेट गिरा! अगला बल्लेबाज चुनें:',
+                      '🎯 Wicket! Select Next Batsman:',
+                      '🎯 Wicket! अगला बल्लेबाज चुनें:'
+                    )}
                   </span>
                   <button
                     type="button"
                     onClick={() => setNeedsNextBatsman(false)}
                     className="text-xs font-black bg-slate-950 text-white px-2.5 py-0.5 rounded-lg cursor-pointer"
                   >
-                    बंद करें ✕
+                    ✕
                   </button>
                 </div>
 
-                {/* Step 1: Optional Dismissal Type + Who took Catch/Stumping (for Best Catch / Best Keeper Awards!) */}
+                {/* Step 1: Dismissal Type + Fielder */}
                 <div className="bg-amber-300/70 rounded-xl p-2.5 space-y-2">
-                  <div className="text-[11px] font-black">
-                    1️⃣ आउट कैसे हुआ? (बेस्ट कैच / बेस्ट कीपर / बेस्ट फील्डर अवार्ड के लिए):
-                  </div>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
                     {[
-                      { id: 'Catch', label: '🙌 कैच आउट (Catch)' },
-                      { id: 'Keeping', label: '🧤 स्टंप / कीपर (Keeping)' },
-                      { id: 'RunOut', label: '🎯 रन आउट (Fielder)' },
-                      { id: 'Bowled', label: '🎳 बोल्ड / LBW' },
+                      { id: 'Catch', label: t3(lang, '🙌 कैच आउट', '🙌 Catch Out', '🙌 कैच (Catch)') },
+                      { id: 'Keeping', label: t3(lang, '🧤 स्टंप/कीपर', '🧤 Stumped/Keeper', '🧤 कीपर (Keeping)') },
+                      { id: 'RunOut', label: t3(lang, '🎯 रन आउट', '🎯 Run Out', '🎯 रन आउट (RunOut)') },
+                      { id: 'Bowled', label: t3(lang, '🎳 बोल्ड / पगबाधा', '🎳 Bowled / LBW', '🎳 बोल्ड / LBW') },
                     ].map((d) => (
                       <button
                         key={d.id}
@@ -2480,44 +2320,30 @@ export const FBLiveBroadcastStudioView: React.FC<
                   </div>
 
                   {outDismissalType !== 'Bowled' && (
-                    <div className="space-y-1 pt-1">
-                      <div className="text-[10px] font-black text-slate-900">
-                        किस खिलाड़ी ने{' '}
-                        {outDismissalType === 'Catch'
-                          ? 'कैच पकड़ा'
-                          : outDismissalType === 'Keeping'
-                          ? 'स्टंपिंग / कीपर कैच किया'
-                          : 'रन-आउट किया'}
-                        ? (टैप करें — अवार्ड में +1 जुड़ेगा):
-                      </div>
-                      <div className="flex flex-wrap gap-1">
-                        {liveState.teamBPlayers.map((fielder, fIdx) => (
-                          <button
-                            key={fIdx}
-                            type="button"
-                            onClick={() =>
-                              handleAddFieldingCredit(fielder, outDismissalType)
-                            }
-                            className={`px-2 py-1 rounded-lg text-[10px] font-black cursor-pointer ${
-                              outFielderCredited === fielder
-                                ? 'bg-emerald-700 text-white'
-                                : 'bg-slate-900/90 text-amber-300 hover:bg-slate-800'
-                            }`}
-                          >
-                            {outFielderCredited === fielder ? '✓ ' : '+ '}
-                            {cleanBroadcastName(fielder)}
-                          </button>
-                        ))}
-                      </div>
+                    <div className="flex flex-wrap gap-1 pt-1">
+                      {liveState.teamBPlayers.map((fielder, fIdx) => (
+                        <button
+                          key={fIdx}
+                          type="button"
+                          onClick={() =>
+                            handleAddFieldingCredit(fielder, outDismissalType)
+                          }
+                          className={`px-2 py-1 rounded-lg text-[10px] font-black cursor-pointer ${
+                            outFielderCredited === fielder
+                              ? 'bg-emerald-700 text-white'
+                              : 'bg-slate-900/90 text-amber-300 hover:bg-slate-800'
+                          }`}
+                        >
+                          {outFielderCredited === fielder ? '✓ ' : '+ '}
+                          {cleanBroadcastName(fielder)}
+                        </button>
+                      ))}
                     </div>
                   )}
                 </div>
 
-                {/* Step 2: Select Next Batsman in 1 Tap OR Type/Edit Name */}
+                {/* Step 2: Select Next Batsman */}
                 <div className="space-y-1.5">
-                  <div className="text-[11px] font-black">
-                    2️⃣ अगला नया बल्लेबाज चुनें (1-क्लिक में क्रीज पर भेजें):
-                  </div>
                   <div className="flex flex-wrap gap-1.5">
                     {liveState.teamAPlayers
                       .filter(
@@ -2546,13 +2372,12 @@ export const FBLiveBroadcastStudioView: React.FC<
                       })}
                   </div>
 
-                  {/* Custom / Editable Next Batsman Name Input */}
                   <div className="flex items-center gap-2 pt-1">
                     <input
                       type="text"
                       value={customNextBatsman}
                       onChange={(e) => setCustomNextBatsman(e.target.value)}
-                      placeholder="या नए बल्लेबाज का नाम यहाँ लिखें / एडिट करें..."
+                      placeholder={t3(lang, 'नया बल्लेबाज नाम...', 'New batsman name...', 'नया बल्लेबाज नाम...')}
                       className="flex-1 px-3 py-1.5 rounded-xl bg-white text-slate-950 text-xs font-bold border border-slate-400"
                     />
                     <button
@@ -2562,7 +2387,7 @@ export const FBLiveBroadcastStudioView: React.FC<
                       }
                       className="px-3 py-1.5 rounded-xl bg-emerald-700 text-white text-xs font-black cursor-pointer shrink-0"
                     >
-                      ✓ क्रीज पर भेजें
+                      {t3(lang, '✓ चुनें', '✓ Select', '✓ चुनें')}
                     </button>
                   </div>
                 </div>
@@ -2576,49 +2401,21 @@ export const FBLiveBroadcastStudioView: React.FC<
               <div className="p-3.5 rounded-2xl bg-sky-400 text-slate-950 space-y-2.5 shadow-xl border-2 border-white">
                 <div className="flex items-center justify-between border-b border-slate-950/15 pb-1.5">
                   <span className="text-xs sm:text-sm font-black uppercase">
-                    ⚾ ओवर #{liveState.overs} समाप्त! अगला गेंदबाज (Next Bowler) 1-क्लिक में चुनें:
+                    {t3(
+                      lang,
+                      `⚾ ओवर #${liveState.overs} समाप्त! अगला गेंदबाज चुनें:`,
+                      `⚾ Over #${liveState.overs} Complete! Select Next Bowler:`,
+                      `⚾ Over #${liveState.overs} समाप्त! अगला Bowler चुनें:`
+                    )}
                   </span>
                   <button
                     type="button"
                     onClick={() => setNeedsNextBowler(false)}
                     className="text-xs font-black bg-slate-950 text-white px-2.5 py-0.5 rounded-lg cursor-pointer"
                   >
-                    बंद करें ✕
+                    ✕
                   </button>
                 </div>
-
-                {liveState.overHistory && liveState.overHistory.length > 0 && (
-                  <div className="text-[11px] font-black bg-white/80 px-2.5 py-1 rounded-lg">
-                    पिछला ओवर रिकॉर्ड (ओवर #
-                    {
-                      liveState.overHistory[liveState.overHistory.length - 1]
-                        .overNumber
-                    }{' '}
-                    •{' '}
-                    {cleanBroadcastName(
-                      liveState.overHistory[liveState.overHistory.length - 1]
-                        .bowlerName
-                    )}
-                    ):{' '}
-                    <span className="text-red-700">
-                      {
-                        liveState.overHistory[liveState.overHistory.length - 1]
-                          .runs
-                      }{' '}
-                      रन,{' '}
-                      {
-                        liveState.overHistory[liveState.overHistory.length - 1]
-                          .wickets
-                      }{' '}
-                      विकेट
-                    </span>{' '}
-                    [
-                    {liveState.overHistory[
-                      liveState.overHistory.length - 1
-                    ].balls.join(' ')}
-                    ]
-                  </div>
-                )}
 
                 <div className="flex flex-wrap gap-1.5">
                   {liveState.teamBPlayers.map((bowler, idx) => {
@@ -2647,13 +2444,12 @@ export const FBLiveBroadcastStudioView: React.FC<
                   })}
                 </div>
 
-                {/* Custom / Editable Next Bowler Name Input */}
                 <div className="flex items-center gap-2 pt-1">
                   <input
                     type="text"
                     value={customNextBowler}
                     onChange={(e) => setCustomNextBowler(e.target.value)}
-                    placeholder="या नए गेंदबाज का नाम यहाँ लिखें / एडिट करें..."
+                    placeholder={t3(lang, 'नया गेंदबाज नाम...', 'New bowler name...', 'नया गेंदबाज नाम...')}
                     className="flex-1 px-3 py-1.5 rounded-xl bg-white text-slate-950 text-xs font-bold border border-slate-400"
                   />
                   <button
@@ -2663,7 +2459,7 @@ export const FBLiveBroadcastStudioView: React.FC<
                     }
                     className="px-3 py-1.5 rounded-xl bg-blue-900 text-white text-xs font-black cursor-pointer shrink-0"
                   >
-                    ✓ ओवर शुरू करें
+                    {t3(lang, '✓ चुनें', '✓ Select', '✓ चुनें')}
                   </button>
                 </div>
               </div>
@@ -2676,7 +2472,7 @@ export const FBLiveBroadcastStudioView: React.FC<
                 onClick={() => handleBallScore(0)}
                 className="py-3.5 rounded-2xl bg-slate-800 hover:bg-slate-700 font-black text-sm border border-white/15 cursor-pointer active:scale-95"
               >
-                {t3(lang, '0 (डॉट गेंद)', '0 (Dot Ball)', '0 (डॉट Ball)')}
+                {t3(lang, '0 (डॉट)', '0 (Dot)', '0 (डॉट)')}
               </button>
               <button
                 type="button"
@@ -2721,12 +2517,7 @@ export const FBLiveBroadcastStudioView: React.FC<
                 }
                 className="py-4 rounded-2xl bg-red-600 hover:bg-red-500 text-white font-black text-sm cursor-pointer shadow-md active:scale-95 col-span-2"
               >
-                {t3(
-                  lang,
-                  '🎯 आउट / विकेट (WICKET)',
-                  '🎯 OUT / WICKET',
-                  '🎯 OUT विकेट'
-                )}
+                {t3(lang, '🎯 आउट / विकेट', '🎯 OUT / WICKET', '🎯 OUT विकेट')}
               </button>
             </div>
 
@@ -2734,18 +2525,12 @@ export const FBLiveBroadcastStudioView: React.FC<
             <div className="bg-slate-900/90 rounded-2xl p-2.5 border border-purple-500/30 space-y-2">
               <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] font-black text-purple-300">
                 <span>
-                  {t3(
-                    lang,
-                    '➕ अतिरिक्त रन बटन (वाइड, नो-बॉल, बाई, लेग-बाई):',
-                    '➕ Extras (Wide, No-Ball, Bye, Leg-Bye):',
-                    '➕ Extras (Wide, No-Ball, Bye, Leg-Bye):'
-                  )}
+                  {t3(lang, '➕ अतिरिक्त रन:', '➕ Extras:', '➕ Extras:')}
                 </span>
                 <span className="font-mono text-amber-300">
-                  {t3(lang, 'कुल अतिरिक्त', 'Total Extras', 'Extras')}:{' '}
-                  {liveState.extras || 0} (WD:{liveState.wides || 0}, NB:
-                  {liveState.noBalls || 0}, B:{liveState.byes || 0}, LB:
-                  {liveState.legByes || 0})
+                  {t3(lang, 'कुल', 'Total', 'Total')}: {liveState.extras || 0}{' '}
+                  (WD:{liveState.wides || 0}, NB:{liveState.noBalls || 0}, B:
+                  {liveState.byes || 0}, LB:{liveState.legByes || 0})
                 </span>
               </div>
 
@@ -2756,10 +2541,10 @@ export const FBLiveBroadcastStudioView: React.FC<
                   onClick={() => handleBallScore(1, { extraType: 'WD' })}
                   className="py-2.5 px-2 rounded-xl bg-purple-700 hover:bg-purple-600 text-white font-black text-xs cursor-pointer active:scale-95"
                 >
-                  {t3(lang, '+1 वाइड (WD)', '+1 Wide (WD)', '+1 वाइड (WD)')}
+                  {t3(lang, '+1 वाइड', '+1 Wide (WD)', '+1 वाइड (WD)')}
                 </button>
 
-                {/* 2. NO BALL (1-Tap +1 NB or expand for NB + Bat runs) */}
+                {/* 2. NO BALL */}
                 <div className="flex items-stretch gap-1">
                   <button
                     type="button"
@@ -2771,15 +2556,14 @@ export const FBLiveBroadcastStudioView: React.FC<
                     }
                     className="flex-1 py-2.5 px-2 rounded-xl bg-fuchsia-700 hover:bg-fuchsia-600 text-white font-black text-xs cursor-pointer active:scale-95"
                   >
-                    {t3(lang, '+1 नो-बॉल (NB)', '+1 No-Ball (NB)', '+1 नो-बॉल (NB)')}
+                    {t3(lang, '+1 नो-बॉल', '+1 No-Ball (NB)', '+1 नो-बॉल (NB)')}
                   </button>
                   <button
                     type="button"
                     onClick={() => setShowNoBallSubMenu((v) => !v)}
-                    title="No-Ball + Bat Runs (NB+1, NB+4, NB+6)"
                     className="px-2 rounded-xl bg-fuchsia-900 hover:bg-fuchsia-800 text-amber-300 font-black text-[11px] border border-fuchsia-400/40 cursor-pointer"
                   >
-                    +रन
+                    {t3(lang, '+रन', '+Runs', '+रन')}
                   </button>
                 </div>
 
@@ -2790,7 +2574,7 @@ export const FBLiveBroadcastStudioView: React.FC<
                     onClick={() => handleBallScore(1, { extraType: 'B' })}
                     className="py-1.5 rounded-lg bg-teal-700 hover:bg-teal-600 text-white font-black text-[11px] cursor-pointer"
                   >
-                    {t3(lang, '+1 बाई', '+1 Bye', '+1 बाई (B)')}
+                    {t3(lang, '+1 बाई', '+1 Bye', '+1 बाई')}
                   </button>
                   <button
                     type="button"
@@ -2815,7 +2599,7 @@ export const FBLiveBroadcastStudioView: React.FC<
                     onClick={() => handleBallScore(1, { extraType: 'LB' })}
                     className="py-1.5 rounded-lg bg-indigo-700 hover:bg-indigo-600 text-white font-black text-[11px] cursor-pointer"
                   >
-                    {t3(lang, '+1 लेग-बाई', '+1 LegBye', '+1 लेग-बाई (LB)')}
+                    {t3(lang, '+1 लेग-बाई', '+1 LegBye', '+1 लेग-बाई')}
                   </button>
                   <button
                     type="button"
@@ -2834,17 +2618,8 @@ export const FBLiveBroadcastStudioView: React.FC<
                 </div>
               </div>
 
-              {/* Optional sub-bar when batsman hits runs on a No-Ball */}
               {showNoBallSubMenu && (
                 <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-white/10">
-                  <span className="text-[10px] font-black text-amber-300">
-                    {t3(
-                      lang,
-                      'नो-बॉल पर बल्ले से रन:',
-                      'No-Ball + Bat Runs:',
-                      'No-Ball पर बल्ले से रन:'
-                    )}
-                  </span>
                   {[1, 2, 3, 4, 6].map((batR) => (
                     <button
                       key={batR}
@@ -2859,18 +2634,18 @@ export const FBLiveBroadcastStudioView: React.FC<
                       }
                       className="px-2.5 py-1 rounded-lg bg-fuchsia-600 hover:bg-fuchsia-500 text-white font-black text-xs cursor-pointer"
                     >
-                      NB + {batR} ({1 + batR} रन)
+                      NB+{batR}
                     </button>
                   ))}
                 </div>
               )}
             </div>
 
-            {/* INSTANT MISTAKE CORRECTION BAR (+/- RUNS, WICKETS, BALLS, OVERS) — NO SQUISHING! */}
-            <div className="bg-slate-900/95 rounded-2xl p-3 border border-slate-700 space-y-2">
-              <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] font-extrabold text-amber-300">
+            {/* INSTANT +/- CORRECTION BAR */}
+            <div className="bg-slate-900/95 rounded-2xl p-2.5 border border-slate-700 space-y-2">
+              <div className="flex items-center justify-between gap-2 text-[11px] font-extrabold text-amber-300">
                 <span>
-                  🛠️ तुरंत गलती सुधार बटन (रन, विकेट, गेंद या ओवर घटाएं/बढ़ाएं):
+                  {t3(lang, '🛠️ सुधार बटन:', '🛠️ Quick Adjust:', '🛠️ सुधार बटन:')}
                 </span>
                 <button
                   type="button"
@@ -2882,6 +2657,11 @@ export const FBLiveBroadcastStudioView: React.FC<
                         wickets: 0,
                         overs: 0,
                         balls: 0,
+                        extras: 0,
+                        wides: 0,
+                        noBalls: 0,
+                        byes: 0,
+                        legByes: 0,
                         strikerRuns: 0,
                         strikerBalls: 0,
                         strikerFours: 0,
@@ -2904,13 +2684,20 @@ export const FBLiveBroadcastStudioView: React.FC<
                       true
                     );
                     triggerToast(
-                      '✓ नया मैच 0/0 पर रीसेट हो गया (UNDO से वापस भी ला सकते हैं)'
+                      t3(
+                        lang,
+                        '✓ नया मैच रीसेट हो गया',
+                        '✓ Match Reset to 0/0',
+                        '✓ नया मैच 0/0 रीसेट'
+                      )
                     );
                   }}
                   className="px-2.5 py-1 rounded-lg bg-red-600/20 border border-red-500/40 text-red-300 hover:bg-red-600 hover:text-white flex items-center gap-1 cursor-pointer shrink-0 whitespace-nowrap"
                 >
                   <RotateCcw className="w-3 h-3" />
-                  <span>नया मैच 0/0 रीसेट</span>
+                  <span>
+                    {t3(lang, '0/0 रीसेट', 'Reset 0/0', '0/0 रीसेट')}
+                  </span>
                 </button>
               </div>
 
@@ -2925,7 +2712,7 @@ export const FBLiveBroadcastStudioView: React.FC<
                     <Minus className="w-3.5 h-3.5" />
                   </button>
                   <span className="text-[11px] text-slate-200 truncate px-1">
-                    रन ({liveState.runs})
+                    {t3(lang, 'रन', 'Runs', 'रन')} ({liveState.runs})
                   </span>
                   <button
                     type="button"
@@ -2946,7 +2733,7 @@ export const FBLiveBroadcastStudioView: React.FC<
                     <Minus className="w-3.5 h-3.5" />
                   </button>
                   <span className="text-[11px] text-slate-200 truncate px-1">
-                    विकेट ({liveState.wickets})
+                    {t3(lang, 'विकेट', 'Wkts', 'विकेट')} ({liveState.wickets})
                   </span>
                   <button
                     type="button"
@@ -2967,7 +2754,7 @@ export const FBLiveBroadcastStudioView: React.FC<
                     <Minus className="w-3.5 h-3.5" />
                   </button>
                   <span className="text-[11px] text-slate-200 truncate px-1">
-                    गेंद (.{liveState.balls})
+                    {t3(lang, 'गेंद', 'Balls', 'गेंद')} (.{liveState.balls})
                   </span>
                   <button
                     type="button"
@@ -2988,7 +2775,7 @@ export const FBLiveBroadcastStudioView: React.FC<
                     <Minus className="w-3.5 h-3.5" />
                   </button>
                   <span className="text-[11px] text-slate-200 truncate px-1">
-                    ओवर ({liveState.overs})
+                    {t3(lang, 'ओवर', 'Overs', 'ओवर')} ({liveState.overs})
                   </span>
                   <button
                     type="button"
@@ -3001,11 +2788,11 @@ export const FBLiveBroadcastStudioView: React.FC<
               </div>
             </div>
 
-            {/* SIMPLE TEAM & PLAYER DROPDOWNS + EDITABLE NAMES RIGHT INSIDE THE PAD */}
+            {/* SIMPLE TEAM & PLAYER DROPDOWNS + EDITABLE NAMES */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
               <div>
                 <label className="block text-[11px] font-bold text-amber-300 mb-1">
-                  🏏 बल्लेबाजी टीम (8 टीमों में से चुनें):
+                  {t3(lang, '🏏 बल्लेबाजी टीम:', '🏏 Batting Team:', '🏏 बल्लेबाजी टीम:')}
                 </label>
                 <select
                   value={liveState.battingTeamId}
@@ -3022,7 +2809,7 @@ export const FBLiveBroadcastStudioView: React.FC<
 
               <div>
                 <label className="block text-[11px] font-bold text-sky-300 mb-1">
-                  ⚾ गेंदबाजी टीम (8 टीमों में से चुनें):
+                  {t3(lang, '⚾ गेंदबाजी टीम:', '⚾ Bowling Team:', '⚾ गेंदबाजी टीम:')}
                 </label>
                 <select
                   value={liveState.bowlingTeamId}
@@ -3037,12 +2824,12 @@ export const FBLiveBroadcastStudioView: React.FC<
                 </select>
               </div>
 
-              {/* Striker & Non-Striker with 1-Tap Swap + Editable Name */}
+              {/* Striker & Non-Striker */}
               <div className="space-y-1">
                 <div className="flex items-center justify-between">
                   <label className="text-[11px] font-bold text-amber-300">
-                    बल्लेबाज 1 (Striker*) — {liveState.strikerRuns}(
-                    {liveState.strikerBalls})
+                    {t3(lang, 'बल्लेबाज 1', 'Striker*', 'बल्लेबाज 1 (Striker*)')} —{' '}
+                    {liveState.strikerRuns}({liveState.strikerBalls})
                   </label>
                   <button
                     type="button"
@@ -3064,7 +2851,7 @@ export const FBLiveBroadcastStudioView: React.FC<
                     className="text-[10px] font-black text-amber-400 flex items-center gap-0.5 cursor-pointer"
                   >
                     <RefreshCw className="w-3 h-3" />
-                    <span>स्ट्राइक बदलें</span>
+                    <span>{t3(lang, 'स्ट्राइक बदलें', 'Swap', 'स्ट्राइक बदलें')}</span>
                   </button>
                 </div>
                 <select
@@ -3084,15 +2871,14 @@ export const FBLiveBroadcastStudioView: React.FC<
                   onChange={(e) =>
                     pushLiveState({ ...liveState, strikerName: e.target.value })
                   }
-                  placeholder="बल्लेबाज 1 का नाम एडिट करें..."
                   className="w-full px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-slate-200 text-[11px] font-bold"
                 />
               </div>
 
               <div className="space-y-1">
                 <label className="block text-[11px] font-bold text-slate-300">
-                  बल्लेबाज 2 (Non-Striker) — {liveState.nonStrikerRuns}(
-                  {liveState.nonStrikerBalls})
+                  {t3(lang, 'बल्लेबाज 2', 'Non-Striker', 'बल्लेबाज 2 (Non-Striker)')} —{' '}
+                  {liveState.nonStrikerRuns}({liveState.nonStrikerBalls})
                 </label>
                 <select
                   value={liveState.nonStrikerName}
@@ -3123,7 +2909,6 @@ export const FBLiveBroadcastStudioView: React.FC<
                       nonStrikerName: e.target.value,
                     })
                   }
-                  placeholder="बल्लेबाज 2 का नाम एडिट करें..."
                   className="w-full px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-slate-200 text-[11px] font-bold"
                 />
               </div>
@@ -3131,15 +2916,16 @@ export const FBLiveBroadcastStudioView: React.FC<
               <div className="space-y-1">
                 <div className="flex items-center justify-between">
                   <label className="text-[11px] font-bold text-sky-300">
-                    वर्तमान गेंदबाज ({liveState.bowlerOvers || '0.0'} Ov,{' '}
-                    {liveState.bowlerRuns}R, {liveState.bowlerWickets}W)
+                    {t3(lang, 'गेंदबाज', 'Bowler', 'गेंदबाज')} (
+                    {liveState.bowlerOvers || '0.0'} Ov, {liveState.bowlerRuns}
+                    R, {liveState.bowlerWickets}W)
                   </label>
                   <button
                     type="button"
                     onClick={() => setNeedsNextBowler(true)}
                     className="text-[10px] font-black text-sky-400 underline cursor-pointer"
                   >
-                    गेंदबाज बदलें
+                    {t3(lang, 'बदलें', 'Change', 'बदलें')}
                   </button>
                 </div>
                 <select
@@ -3159,14 +2945,13 @@ export const FBLiveBroadcastStudioView: React.FC<
                   onChange={(e) =>
                     pushLiveState({ ...liveState, bowlerName: e.target.value })
                   }
-                  placeholder="गेंदबाज का नाम एडिट करें..."
                   className="w-full px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-slate-200 text-[11px] font-bold"
                 />
               </div>
 
               <div className="space-y-1">
                 <label className="block text-[11px] font-bold text-slate-300">
-                  टारगेट रन (पहली पारी में 0 रखें) & मैच ओवर:
+                  {t3(lang, 'टारगेट व कुल ओवर:', 'Target & Total Overs:', 'Target & कुल ओवर:')}
                 </label>
                 <div className="grid grid-cols-2 gap-2">
                   <input
@@ -3178,7 +2963,7 @@ export const FBLiveBroadcastStudioView: React.FC<
                         targetRuns: Number(e.target.value),
                       })
                     }
-                    placeholder="Target (0=1st Inn)"
+                    placeholder="Target"
                     className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs font-mono font-bold"
                   />
                   <input
@@ -3190,7 +2975,7 @@ export const FBLiveBroadcastStudioView: React.FC<
                         totalMatchOvers: Math.max(1, Number(e.target.value)),
                       })
                     }
-                    placeholder="कुल ओवर (16)"
+                    placeholder="Overs (16)"
                     className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-amber-300 text-xs font-mono font-bold"
                   />
                 </div>
@@ -3203,17 +2988,17 @@ export const FBLiveBroadcastStudioView: React.FC<
           ================================================================= */}
           <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-4 sm:p-5 space-y-4 shadow-sm">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 dark:border-slate-800 pb-3">
-              <div>
-                <h3 className="text-sm sm:text-base font-black text-slate-900 dark:text-white flex items-center gap-1.5">
-                  <History className="w-4 h-4 text-blue-600" />
-                  <span>
-                    📊 डायनामिक मैच रिकॉर्ड (बल्लेबाज, गेंदबाज और पिछले ओवर का पूरा हिसाब)
-                  </span>
-                </h3>
-                <p className="text-[11px] font-bold text-slate-500">
-                  हर गेंद पर अपने-आप अपडेट होता है • अवार्ड्स के लिए कैच/कीपिंग/फील्डिंग भी यहीं से जोड़ें
-                </p>
-              </div>
+              <h3 className="text-sm sm:text-base font-black text-slate-900 dark:text-white flex items-center gap-1.5">
+                <History className="w-4 h-4 text-blue-600" />
+                <span>
+                  {t3(
+                    lang,
+                    '📊 मैच रिकॉर्ड (बल्लेबाज, गेंदबाज व पिछले ओवर)',
+                    '📊 Live Match Records (Batsmen, Bowlers & Overs)',
+                    '📊 मैच रिकॉर्ड (Batsmen, Bowlers & Overs)'
+                  )}
+                </span>
+              </h3>
 
               <button
                 type="button"
@@ -3221,16 +3006,25 @@ export const FBLiveBroadcastStudioView: React.FC<
                 className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs cursor-pointer shadow-sm"
               >
                 <Save className="w-3.5 h-3.5" />
-                <span>💾 इस मैच को 8-टीम सीरीज़ रिकॉर्ड में सेव करें</span>
+                <span>
+                  {t3(
+                    lang,
+                    '💾 सीरीज़ में सेव करें',
+                    '💾 Save Match to Series',
+                    '💾 सीरीज़ में Save करें'
+                  )}
+                </span>
               </button>
             </div>
 
-            {/* 1. PREVIOUS OVERS RECORD (पिछले हर ओवर का रिकॉर्ड) */}
+            {/* 1. PREVIOUS OVERS RECORD */}
             <div className="bg-slate-50 dark:bg-slate-800/60 rounded-2xl p-3 border border-slate-200 dark:border-slate-700 space-y-2">
               <div className="text-xs font-black text-slate-800 dark:text-amber-300 flex items-center justify-between">
-                <span>⏮️ पिछले ओवर्स का रिकॉर्ड (Over-by-Over History):</span>
+                <span>
+                  {t3(lang, '⏮️ पिछले ओवर:', '⏮️ Previous Overs:', '⏮️ पिछले ओवर:')}
+                </span>
                 <span className="text-[11px] text-slate-500">
-                  कुल पूरे ओवर: {liveState.overHistory?.length || 0}
+                  {liveState.overHistory?.length || 0} Overs
                 </span>
               </div>
 
@@ -3243,7 +3037,7 @@ export const FBLiveBroadcastStudioView: React.FC<
                     >
                       <div className="min-w-0">
                         <div className="font-black text-slate-900 dark:text-white truncate">
-                          ओवर #{ov.overNumber} •{' '}
+                          Ov #{ov.overNumber} •{' '}
                           <span className="text-blue-600 dark:text-sky-400">
                             {cleanBroadcastName(ov.bowlerName)}
                           </span>
@@ -3269,18 +3063,18 @@ export const FBLiveBroadcastStudioView: React.FC<
                       </div>
                       <div className="text-right font-mono font-black shrink-0">
                         <div className="text-slate-900 dark:text-white">
-                          {ov.runs} रन
+                          {ov.runs} R
                         </div>
                         <div className="text-[10px] text-red-600">
-                          {ov.wickets} विकेट
+                          {ov.wickets} W
                         </div>
                       </div>
                     </div>
                   ))}
                 </div>
               ) : (
-                <div className="text-xs font-bold text-slate-500 py-2">
-                  अभी पहला ओवर चल रहा है — जैसे ही 6 गेंद पूरी होंगी, हर ओवर का रिकॉर्ड यहाँ अपने-आप सेव होता जाएगा।
+                <div className="text-xs font-bold text-slate-500 py-1">
+                  {t3(lang, 'पहला ओवर जारी है...', 'First over in progress...', 'पहला ओवर जारी है...')}
                 </div>
               )}
             </div>
@@ -3290,7 +3084,10 @@ export const FBLiveBroadcastStudioView: React.FC<
               {/* Batsmen Record Table */}
               <div className="rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden">
                 <div className="bg-amber-500 text-slate-950 px-3 py-2 text-xs font-black flex justify-between">
-                  <span>🏏 बल्लेबाज रिकॉर्ड ({liveState.battingTeamName})</span>
+                  <span>
+                    🏏 {t3(lang, 'बल्लेबाज', 'Batsmen', 'बल्लेबाज')} (
+                    {liveState.battingTeamName})
+                  </span>
                   <span>R (B) • 4s/6s • SR</span>
                 </div>
                 <div className="divide-y divide-slate-200 dark:divide-slate-800 max-h-56 overflow-y-auto bg-white dark:bg-slate-900">
@@ -3317,12 +3114,7 @@ export const FBLiveBroadcastStudioView: React.FC<
                               {cleanBroadcastName(bat.name)}{' '}
                               {isStriker && (
                                 <span className="text-amber-600 dark:text-amber-400">
-                                  * (Striker)
-                                </span>
-                              )}
-                              {isNonStriker && (
-                                <span className="text-emerald-600">
-                                  (Non-Striker)
+                                  *
                                 </span>
                               )}
                             </div>
@@ -3359,8 +3151,11 @@ export const FBLiveBroadcastStudioView: React.FC<
               {/* Bowlers Record Table */}
               <div className="rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden">
                 <div className="bg-blue-700 text-white px-3 py-2 text-xs font-black flex justify-between">
-                  <span>⚾ गेंदबाज रिकॉर्ड ({liveState.bowlingTeamName})</span>
-                  <span>O • 0s • R • W • ECO</span>
+                  <span>
+                    ⚾ {t3(lang, 'गेंदबाज', 'Bowlers', 'गेंदबाज')} (
+                    {liveState.bowlingTeamName})
+                  </span>
+                  <span>O • R • W • ECO</span>
                 </div>
                 <div className="divide-y divide-slate-200 dark:divide-slate-800 max-h-56 overflow-y-auto bg-white dark:bg-slate-900">
                   {Object.values(liveState.bowlerRecords || {}).map(
@@ -3385,12 +3180,12 @@ export const FBLiveBroadcastStudioView: React.FC<
                               {cleanBroadcastName(bw.name)}{' '}
                               {isCurrent && (
                                 <span className="text-blue-600 dark:text-sky-400">
-                                  * (Bowling)
+                                  *
                                 </span>
                               )}
                             </div>
                             <div className="text-[10px] font-bold text-slate-500">
-                              डॉट गेंद: {bw.dots} • चौके: {bw.foursConceded} • छक्के:{' '}
+                              0s:{bw.dots} • 4s:{bw.foursConceded} • 6s:
                               {bw.sixesConceded}
                             </div>
                           </div>
@@ -3412,12 +3207,17 @@ export const FBLiveBroadcastStudioView: React.FC<
               </div>
             </div>
 
-            {/* 3. QUICK 1-TAP CATCH / KEEPING / FIELDING CREDIT BAR FOR AWARDS */}
+            {/* 3. QUICK 1-TAP CATCH / KEEPING / FIELDING CREDIT BAR */}
             <div className="bg-emerald-50 dark:bg-emerald-950/30 rounded-2xl p-3 border border-emerald-300 dark:border-emerald-800/60 space-y-2">
               <div className="text-xs font-black text-emerald-950 dark:text-emerald-300 flex items-center gap-1.5">
                 <UserPlus className="w-4 h-4" />
                 <span>
-                  🧤 बेस्ट कैच, बेस्ट कीपिंग और बेस्ट फील्डर के लिए 1-क्लिक में पॉइंट जोड़ें:
+                  {t3(
+                    lang,
+                    '🧤 फील्डिंग / कैच / कीपिंग पॉइंट:',
+                    '🧤 Fielding / Catch / Keeping Credit:',
+                    '🧤 कैच / कीपिंग / फील्डिंग पॉइंट:'
+                  )}
                 </span>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center">
@@ -3446,13 +3246,13 @@ export const FBLiveBroadcastStudioView: React.FC<
                       handleAddFieldingCredit(
                         selectedFielderForCredit ||
                           liveState.teamBPlayers[0] ||
-                          'फील्डर',
+                          'Fielder',
                         'Catch'
                       )
                     }
                     className="py-2 px-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-[11px] font-black cursor-pointer"
                   >
-                    🙌 +1 कैच
+                    {t3(lang, '🙌 +1 कैच', '🙌 +1 Catch', '🙌 +1 कैच')}
                   </button>
                   <button
                     type="button"
@@ -3460,13 +3260,13 @@ export const FBLiveBroadcastStudioView: React.FC<
                       handleAddFieldingCredit(
                         selectedFielderForCredit ||
                           liveState.teamBPlayers[0] ||
-                          'कीपर',
+                          'Keeper',
                         'Keeping'
                       )
                     }
                     className="py-2 px-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-black cursor-pointer"
                   >
-                    🧤 +1 कीपिंग/स्टंप
+                    {t3(lang, '🧤 +1 कीपिंग', '🧤 +1 Keeping', '🧤 +1 कीपिंग')}
                   </button>
                   <button
                     type="button"
@@ -3474,13 +3274,13 @@ export const FBLiveBroadcastStudioView: React.FC<
                       handleAddFieldingCredit(
                         selectedFielderForCredit ||
                           liveState.teamBPlayers[0] ||
-                          'फील्डर',
+                          'Fielder',
                         'Save'
                       )
                     }
                     className="py-2 px-2 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-[11px] font-black cursor-pointer"
                   >
-                    ⚡ +1 फील्डिंग सेव
+                    {t3(lang, '⚡ +1 फील्डिंग', '⚡ +1 Fielding', '⚡ +1 फील्डिंग')}
                   </button>
                 </div>
               </div>
@@ -3492,18 +3292,17 @@ export const FBLiveBroadcastStudioView: React.FC<
           ================================================================= */}
           <div className="bg-gradient-to-br from-[#0B192C] via-slate-900 to-[#0B192C] text-white rounded-3xl border-2 border-amber-400 p-4 sm:p-5 space-y-4 shadow-xl">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/15 pb-3">
-              <div>
-                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-400 text-slate-950 text-[10px] font-black uppercase">
-                  <Trophy className="w-3 h-3" />
-                  100% Automatic Awards Calculator
+              <h3 className="text-base sm:text-lg font-black text-amber-300 flex items-center gap-1.5">
+                <Trophy className="w-4 h-4" />
+                <span>
+                  {t3(
+                    lang,
+                    '🏆 ऑटोमैटिक अवार्ड्स (मैच व 8-टीम सीरीज़)',
+                    '🏆 Automatic Awards (Match & 8-Team Series)',
+                    '🏆 ऑटोमैटिक अवार्ड्स (Match & Series)'
+                  )}
                 </span>
-                <h3 className="text-base sm:text-lg font-black text-amber-300 mt-1">
-                  🏆 ऑटोमैटिक अवार्ड्स कैलकुलेटर (8-टीम टूर्नामेंट & वर्तमान मैच)
-                </h3>
-                <p className="text-[11px] font-bold text-slate-300">
-                  रन, विकेट, चौके-छक्के, कैच, कीपिंग और फील्डिंग के आधार पर अपने-आप विजेता का नाम निकल आता है!
-                </p>
-              </div>
+              </h3>
 
               <button
                 type="button"
@@ -3515,61 +3314,58 @@ export const FBLiveBroadcastStudioView: React.FC<
                         ? 'score-ticker'
                         : 'awards-ceremony',
                   });
-                  triggerToast(
-                    '🏆 लाइव स्क्रीन पर ऑटोमैटिक अवार्ड्स कार्ड दिखाया गया!'
-                  );
                 }}
                 className="px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs cursor-pointer flex items-center gap-1.5 shadow-md"
               >
                 <Award className="w-4 h-4" />
                 <span>
                   {liveState.screenMode === 'awards-ceremony'
-                    ? '📺 नॉर्मल स्कोर पट्टी पर लौटें'
-                    : '📺 लाइव टीवी पर अवार्ड्स दिखाएं'}
+                    ? t3(lang, '📺 स्कोरबोर्ड दिखाएं', '📺 Show Scoreboard', '📺 स्कोरबोर्ड दिखाएं')
+                    : t3(lang, '📺 टीवी पर अवार्ड्स दिखाएं', '📺 Show Awards on TV', '📺 TV पर अवार्ड्स दिखाएं')}
                 </span>
               </button>
             </div>
 
-            {/* 7 AUTOMATIC AWARD CARDS */}
+            {/* AUTOMATIC AWARD CARDS */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
               {/* 1. Man of the Match */}
               <div className="bg-amber-500/20 border-2 border-amber-400 rounded-2xl p-3 space-y-1">
                 <div className="text-[10px] font-black uppercase text-amber-300">
-                  🏅 1. Man of the Match (इस मैच में)
+                  🏅 {t3(lang, '1. मैन ऑफ द मैच', '1. Man of the Match', '1. Man of the Match')}
                 </div>
                 <div className="text-sm font-black text-white truncate">
                   {cleanBroadcastName(
                     currentMatchAwards.manOfTheMatch?.name
-                  ) || 'स्कोरिंग शुरू करें'}
+                  ) || '—'}
                 </div>
                 <div className="text-[11px] font-bold text-amber-200">
                   {currentMatchAwards.manOfTheMatch
                     ? `${currentMatchAwards.manOfTheMatch.summary} (${currentMatchAwards.manOfTheMatch.points} Pts)`
-                    : 'रन और विकेट के आधार पर ऑटोमैटिक'}
+                    : '—'}
                 </div>
               </div>
 
-              {/* 2. Man of the Series (8-Team Cumulative) */}
+              {/* 2. Man of the Series */}
               <div className="bg-gradient-to-r from-red-600/30 to-amber-500/30 border-2 border-amber-300 rounded-2xl p-3 space-y-1">
                 <div className="text-[10px] font-black uppercase text-amber-200">
-                  🏆 2. Man of the Series (पूरे टूर्नामेंट में)
+                  🏆 {t3(lang, '2. मैन ऑफ द सीरीज़', '2. Man of the Series', '2. Man of the Series')}
                 </div>
                 <div className="text-sm font-black text-white truncate">
                   {cleanBroadcastName(
                     seriesCumulativeAwards.manOfTheMatch?.name
-                  ) || 'स्कोरिंग शुरू करें'}
+                  ) || '—'}
                 </div>
                 <div className="text-[11px] font-bold text-amber-100">
                   {seriesCumulativeAwards.manOfTheMatch
                     ? `${seriesCumulativeAwards.manOfTheMatch.summary} (${seriesCumulativeAwards.manOfTheMatch.points} Pts)`
-                    : `कुल सेव मैच: ${seriesMatches.length}`}
+                    : '—'}
                 </div>
               </div>
 
               {/* 3. Best Batsman */}
               <div className="bg-blue-600/20 border border-blue-400 rounded-2xl p-3 space-y-1">
                 <div className="text-[10px] font-black uppercase text-sky-300">
-                  🏏 3. Best Batsman (बेस्ट बैट्समैन)
+                  🏏 {t3(lang, '3. सर्वश्रेष्ठ बल्लेबाज', '3. Best Batsman', '3. Best Batsman')}
                 </div>
                 <div className="text-sm font-black text-white truncate">
                   {cleanBroadcastName(
@@ -3578,15 +3374,15 @@ export const FBLiveBroadcastStudioView: React.FC<
                 </div>
                 <div className="text-[11px] font-bold text-sky-200">
                   {seriesCumulativeAwards.bestBatsman
-                    ? `${seriesCumulativeAwards.bestBatsman.runs} रन (${seriesCumulativeAwards.bestBatsman.balls} गेंद) • 4s:${seriesCumulativeAwards.bestBatsman.fours} 6s:${seriesCumulativeAwards.bestBatsman.sixes}`
-                    : 'सर्वाधिक रन बनाने वाला बल्लेबाज'}
+                    ? `${seriesCumulativeAwards.bestBatsman.runs} R (${seriesCumulativeAwards.bestBatsman.balls} B)`
+                    : '—'}
                 </div>
               </div>
 
               {/* 4. Best Bowler */}
               <div className="bg-emerald-600/20 border border-emerald-400 rounded-2xl p-3 space-y-1">
                 <div className="text-[10px] font-black uppercase text-emerald-300">
-                  ⚾ 4. Best Bowler (बेस्ट बॉलर)
+                  ⚾ {t3(lang, '4. सर्वश्रेष्ठ गेंदबाज', '4. Best Bowler', '4. Best Bowler')}
                 </div>
                 <div className="text-sm font-black text-white truncate">
                   {cleanBroadcastName(
@@ -3595,17 +3391,15 @@ export const FBLiveBroadcastStudioView: React.FC<
                 </div>
                 <div className="text-[11px] font-bold text-emerald-200">
                   {seriesCumulativeAwards.bestBowler
-                    ? `${seriesCumulativeAwards.bestBowler.wickets} विकेट (${formatBallsToOvers(
-                        seriesCumulativeAwards.bestBowler.ballsBowled
-                      )} ओवर, ${seriesCumulativeAwards.bestBowler.runsConceded} रन)`
-                    : 'सर्वाधिक विकेट लेने वाला गेंदबाज'}
+                    ? `${seriesCumulativeAwards.bestBowler.wickets} W (${seriesCumulativeAwards.bestBowler.runsConceded} R)`
+                    : '—'}
                 </div>
               </div>
 
               {/* 5. Best Catch */}
               <div className="bg-purple-600/20 border border-purple-400 rounded-2xl p-3 space-y-1">
                 <div className="text-[10px] font-black uppercase text-purple-300">
-                  🙌 5. Best Catch (बेस्ट कैच)
+                  🙌 {t3(lang, '5. सर्वश्रेष्ठ कैच', '5. Best Catch', '5. Best Catch')}
                 </div>
                 <div className="text-sm font-black text-white truncate">
                   {cleanBroadcastName(seriesCumulativeAwards.bestCatch?.name) ||
@@ -3613,18 +3407,18 @@ export const FBLiveBroadcastStudioView: React.FC<
                 </div>
                 <div className="text-[11px] font-bold text-purple-200">
                   {seriesCumulativeAwards.bestCatch
-                    ? `कुल ${seriesCumulativeAwards.bestCatch.catches} शानदार कैच`
-                    : 'विकेट या फील्डिंग से +1 कैच जोड़ें'}
+                    ? `${seriesCumulativeAwards.bestCatch.catches} Catches`
+                    : '—'}
                 </div>
               </div>
 
-              {/* 6. Best Wicket-Keeper & 7. Best Fielder */}
+              {/* 6. Best Keeper & 7. Best Fielder */}
               <div className="bg-rose-600/20 border border-rose-400 rounded-2xl p-3 space-y-1">
                 <div className="text-[10px] font-black uppercase text-rose-300">
-                  🧤 6. Best Keeper & ⚡ 7. Best Fielder
+                  🧤 {t3(lang, '6. कीपर व फील्डर', '6. Best Keeper & Fielder', '6. Best Keeper & Fielder')}
                 </div>
                 <div className="text-xs font-black text-white truncate">
-                  कीपर:{' '}
+                  🧤{' '}
                   {cleanBroadcastName(
                     seriesCumulativeAwards.bestKeeper?.name
                   ) || '—'}{' '}
@@ -3633,7 +3427,7 @@ export const FBLiveBroadcastStudioView: React.FC<
                     : ''}
                 </div>
                 <div className="text-xs font-black text-teal-300 truncate">
-                  फील्डर:{' '}
+                  ⚡{' '}
                   {cleanBroadcastName(
                     seriesCumulativeAwards.bestFielder?.name
                   ) || '—'}{' '}
@@ -3642,7 +3436,7 @@ export const FBLiveBroadcastStudioView: React.FC<
                         seriesCumulativeAwards.bestFielder.catches +
                         seriesCumulativeAwards.bestFielder.runOuts +
                         seriesCumulativeAwards.bestFielder.saves
-                      } शिकार)`
+                      })`
                     : ''}
                 </div>
               </div>
@@ -3651,19 +3445,18 @@ export const FBLiveBroadcastStudioView: React.FC<
             {seriesMatches.length > 0 && (
               <div className="flex items-center justify-between pt-2 border-t border-white/10 text-[11px] text-slate-300">
                 <span>
-                  📚 8-टीम सीरीज़ में सेव किए गए कुल मैच: {seriesMatches.length}
+                  {t3(lang, 'सेव मैच:', 'Saved Matches:', 'सेव मैच:')} {seriesMatches.length}
                 </span>
                 <button
                   type="button"
                   onClick={() => {
                     setSeriesMatches([]);
                     localStorage.removeItem(SERIES_STORAGE_KEY);
-                    triggerToast('सीरीज़ इतिहास साफ कर दिया गया');
                   }}
                   className="text-red-400 hover:underline flex items-center gap-1 cursor-pointer"
                 >
                   <Trash2 className="w-3 h-3" />
-                  <span>सीरीज़ रिकॉर्ड रीसेट करें</span>
+                  <span>{t3(lang, 'रीसेट', 'Reset', 'रीसेट')}</span>
                 </button>
               </div>
             )}
@@ -3677,7 +3470,9 @@ export const FBLiveBroadcastStudioView: React.FC<
             <div className="flex items-center justify-between">
               <span className="text-xs font-black uppercase text-red-600 flex items-center gap-1.5">
                 <span className="w-2.5 h-2.5 rounded-full bg-red-600 animate-ping" />
-                <span>LIVE TV MONITOR (मोबाइल 1 पर ऐसा दिखेगा)</span>
+                <span>
+                  {t3(lang, 'लाइव टीवी प्रिव्यू', 'LIVE TV MONITOR', 'LIVE TV प्रिव्यू')}
+                </span>
               </span>
               <button
                 type="button"
@@ -3701,7 +3496,7 @@ export const FBLiveBroadcastStudioView: React.FC<
               <div className="text-xs font-black text-slate-900 dark:text-white flex items-center gap-1.5">
                 <Tv className="w-4 h-4 text-red-600" />
                 <span>
-                  लाइव स्क्रीन पर क्या दिखाना है? (1-Tap Screen Mode):
+                  {t3(lang, 'स्क्रीन मोड चुनें:', 'Screen Display Mode:', 'स्क्रीन मोड (Screen Mode):')}
                 </span>
               </div>
 
@@ -3709,31 +3504,31 @@ export const FBLiveBroadcastStudioView: React.FC<
                 {[
                   {
                     mode: 'score-ticker' as BroadcastScreenMode,
-                    label: '📺 नॉर्मल मैच मोड (नीचे स्कोर पट्टी)',
+                    label: t3(lang, '📺 स्कोरबोर्ड पट्टी', '📺 Scoreboard Bar', '📺 स्कोरबोर्ड पट्टी'),
                   },
                   {
                     mode: 'full-scorecard' as BroadcastScreenMode,
-                    label: '📊 पूरा मैच स्कोरकार्ड दिखाएं',
+                    label: t3(lang, '📊 पूरा स्कोरकार्ड', '📊 Full Scorecard', '📊 पूरा स्कोरकार्ड'),
                   },
                   {
                     mode: 'awards-ceremony' as BroadcastScreenMode,
-                    label: '🏆 ऑटोमैटिक 7 अवार्ड्स दिखाएं',
+                    label: t3(lang, '🏆 अवार्ड्स कार्ड', '🏆 Awards Card', '🏆 अवार्ड्स कार्ड'),
                   },
                   {
                     mode: 'squad-team-a' as BroadcastScreenMode,
-                    label: `👥 ${liveState.battingTeamName} (15 खिलाड़ी)`,
+                    label: `👥 ${liveState.battingTeamName}`,
                   },
                   {
                     mode: 'squad-team-b' as BroadcastScreenMode,
-                    label: `👥 ${liveState.bowlingTeamName} (15 खिलाड़ी)`,
+                    label: `👥 ${liveState.bowlingTeamName}`,
                   },
                   {
                     mode: 'squad-vs-both' as BroadcastScreenMode,
-                    label: '⚔️ दोनों टीमों की सूची एक साथ',
+                    label: t3(lang, '⚔️ दोनों टीमें (VS)', '⚔️ Both Squads (VS)', '⚔️ दोनों टीमें (VS)'),
                   },
                   {
                     mode: 'full-sponsor-ad' as BroadcastScreenMode,
-                    label: '📢 फुल-स्क्रीन दुकान विज्ञापन',
+                    label: t3(lang, '📢 फुल विज्ञापन', '📢 Full Sponsor Ad', '📢 फुल विज्ञापन (Ad)'),
                   },
                 ].map((b) => {
                   const active = liveState.screenMode === b.mode;
@@ -3761,7 +3556,7 @@ export const FBLiveBroadcastStudioView: React.FC<
               </div>
             </div>
 
-            {/* Download HD JPG / PDF for Facebook Page */}
+            {/* Download HD JPG / PDF */}
             <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
               <button
                 type="button"
@@ -3817,7 +3612,7 @@ export const FBLiveBroadcastStudioView: React.FC<
                 className="py-2.5 px-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer"
               >
                 <ImageIcon className="w-4 h-4" />
-                <span>स्कोर पोस्ट HD JPG</span>
+                <span>HD JPG</span>
               </button>
 
               <button
@@ -3836,7 +3631,7 @@ export const FBLiveBroadcastStudioView: React.FC<
                 className="py-2.5 px-3 rounded-xl bg-red-600 hover:bg-red-500 text-white font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer"
               >
                 <FileText className="w-4 h-4" />
-                <span>स्कोर कार्ड HD PDF</span>
+                <span>HD PDF</span>
               </button>
             </div>
           </div>
@@ -3846,10 +3641,12 @@ export const FBLiveBroadcastStudioView: React.FC<
             <div className="flex items-center justify-between">
               <h3 className="text-xs sm:text-sm font-black text-slate-900 dark:text-white flex items-center gap-1.5">
                 <Megaphone className="w-4 h-4 text-amber-500" />
-                <span>लोकल मार्केट दुकान विज्ञापन (टैप करके तुरंत बदलें)</span>
+                <span>
+                  {t3(lang, 'दुकान विज्ञापन', 'Sponsor Ads', 'दुकान विज्ञापन (Sponsor Ads)')}
+                </span>
               </h3>
               <span className="text-[11px] font-bold text-emerald-600">
-                {liveState.autoRotateAds ? 'ऑटो रोटेशन चालू है' : 'मैनुअल'}
+                {liveState.autoRotateAds ? 'Auto ON' : 'Manual'}
               </span>
             </div>
 
@@ -3869,9 +3666,6 @@ export const FBLiveBroadcastStudioView: React.FC<
                         activeSponsorIndex: idx,
                         showSponsorTicker: true,
                       });
-                      triggerToast(
-                        `✓ "${sp.shopName}" का विज्ञापन चालू हो गया!`
-                      );
                     }}
                     className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex items-center justify-between gap-2 ${
                       isCurrent
@@ -3894,7 +3688,7 @@ export const FBLiveBroadcastStudioView: React.FC<
                           : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
                       }`}
                     >
-                      {isCurrent ? 'LIVE' : 'चलाएं'}
+                      {isCurrent ? 'LIVE' : t3(lang, 'चलाएं', 'Show', 'चलाएं')}
                     </span>
                   </button>
                 );
@@ -3919,13 +3713,12 @@ export const FBLiveBroadcastStudioView: React.FC<
                 const updatedSponsors = [newAd, ...sponsors];
                 onSaveSponsors?.(updatedSponsors);
                 setQuickShop({ ...quickShop, shopName: '', ownerName: '' });
-                triggerToast('✓ नई दुकान का विज्ञापन जुड़ गया!');
               }}
               className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-2 border-t border-slate-100 dark:border-slate-800"
             >
               <input
                 type="text"
-                placeholder="नई दुकान का नाम..."
+                placeholder={t3(lang, 'दुकान का नाम...', 'Shop name...', 'दुकान का नाम...')}
                 value={quickShop.shopName}
                 onChange={(e) =>
                   setQuickShop({ ...quickShop, shopName: e.target.value })
@@ -3934,7 +3727,7 @@ export const FBLiveBroadcastStudioView: React.FC<
               />
               <input
                 type="text"
-                placeholder="ऑफर / प्रचार लाइन..."
+                placeholder={t3(lang, 'प्रचार लाइन...', 'Tagline / Offer...', 'प्रचार लाइन...')}
                 value={quickShop.tagline}
                 onChange={(e) =>
                   setQuickShop({ ...quickShop, tagline: e.target.value })
@@ -3945,7 +3738,7 @@ export const FBLiveBroadcastStudioView: React.FC<
                 type="submit"
                 className="py-2 px-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs cursor-pointer"
               >
-                + दुकान जोड़ें
+                {t3(lang, '+ जोड़ें', '+ Add Shop', '+ जोड़ें')}
               </button>
             </form>
           </div>
