@@ -5,11 +5,15 @@ import { getStickerDataUrl } from '../utils/cricketGraphics';
 interface DesignMiniPreviewProps {
   doc: DesignDocument;
   maxHeight?: number;
+  selectedElementId?: string | null;
+  onSelectElement?: (elementId: string) => void;
 }
 
 export const DesignMiniPreview: React.FC<DesignMiniPreviewProps> = ({
   doc,
   maxHeight = 230,
+  selectedElementId,
+  onSelectElement,
 }) => {
   // Calculate scale so the full design fits inside a card preview box cleanly
   const scaleByHeight = maxHeight / doc.height;
@@ -43,7 +47,9 @@ export const DesignMiniPreview: React.FC<DesignMiniPreviewProps> = ({
               ? `${doc.borderFrameWidth}px solid ${doc.borderFrameColor || '#0B192C'}`
               : 'none',
           }}
-          className="relative overflow-hidden pointer-events-none"
+          className={`relative overflow-hidden ${
+            onSelectElement ? 'pointer-events-auto' : 'pointer-events-none'
+          }`}
         >
           {doc.innerBorderColor && (
             <div
@@ -51,6 +57,7 @@ export const DesignMiniPreview: React.FC<DesignMiniPreviewProps> = ({
                 position: 'absolute',
                 inset: 8,
                 border: `2.5px solid ${doc.innerBorderColor}`,
+                pointerEvents: 'none',
               }}
             />
           )}
@@ -62,9 +69,30 @@ export const DesignMiniPreview: React.FC<DesignMiniPreviewProps> = ({
                 ? getStickerDataUrl(el.stickerId)
                 : undefined);
 
+            const isTextEditable =
+              Boolean(onSelectElement) &&
+              (el.type === 'heading' ||
+                el.type === 'subheading' ||
+                el.type === 'title' ||
+                el.type === 'body');
+            const isSelected = selectedElementId === el.id;
+
             return (
               <div
                 key={el.id}
+                onClick={
+                  isTextEditable
+                    ? (e) => {
+                        e.stopPropagation();
+                        onSelectElement?.(el.id);
+                      }
+                    : undefined
+                }
+                title={
+                  isTextEditable
+                    ? 'इस बॉक्स का टेक्स्ट एडिट करने के लिए क्लिक करें'
+                    : undefined
+                }
                 style={{
                   position: 'absolute',
                   left: el.x,
@@ -74,9 +102,15 @@ export const DesignMiniPreview: React.FC<DesignMiniPreviewProps> = ({
                   transform: `rotate(${el.rotation || 0}deg)`,
                   opacity: el.opacity ?? 1,
                   backgroundColor: el.backgroundColor || 'transparent',
-                  borderColor: el.borderColor || 'transparent',
-                  borderWidth: el.borderWidth ? `${el.borderWidth}px` : 0,
-                  borderStyle: el.borderStyle || 'solid',
+                  borderColor: isSelected
+                    ? '#22C55E'
+                    : el.borderColor || 'transparent',
+                  borderWidth: isSelected
+                    ? '6px'
+                    : el.borderWidth
+                    ? `${el.borderWidth}px`
+                    : 0,
+                  borderStyle: isSelected ? 'solid' : el.borderStyle || 'solid',
                   borderRadius:
                     el.type === 'circle'
                       ? '9999px'
@@ -85,6 +119,10 @@ export const DesignMiniPreview: React.FC<DesignMiniPreviewProps> = ({
                       : 0,
                   padding: el.padding ? `${el.padding}px` : 0,
                   overflow: 'hidden',
+                  cursor: isTextEditable ? 'pointer' : 'default',
+                  boxShadow: isSelected
+                    ? '0 0 0 6px rgba(34, 197, 94, 0.45)'
+                    : undefined,
                 }}
               >
                 {el.type === 'line' && (
@@ -103,7 +141,11 @@ export const DesignMiniPreview: React.FC<DesignMiniPreviewProps> = ({
                     src={imgSrc}
                     alt={el.label || ''}
                     referrerPolicy="no-referrer"
-                    className="w-full h-full object-contain"
+                    className={`w-full h-full ${
+                      el.type === 'image' && el.borderRadius
+                        ? 'object-cover'
+                        : 'object-contain'
+                    }`}
                   />
                 )}
 

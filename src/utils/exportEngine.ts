@@ -194,7 +194,34 @@ async function renderElementToCanvas(
     if (src) {
       try {
         const img = await loadImage(src);
-        ctx.drawImage(img, 0, 0, el.width, el.height);
+        if (el.type === 'image' && radius > 0) {
+          ctx.save();
+          drawRoundedRect(ctx, 0, 0, el.width, el.height, radius);
+          ctx.clip();
+          const imgRatio = (img.width || 1) / (img.height || 1);
+          const boxRatio = el.width / el.height;
+          let drawW = el.width;
+          let drawH = el.height;
+          let drawX = 0;
+          let drawY = 0;
+          if (imgRatio > boxRatio) {
+            drawW = el.height * imgRatio;
+            drawX = -(drawW - el.width) / 2;
+          } else {
+            drawH = el.width / imgRatio;
+            drawY = -(drawH - el.height) / 2;
+          }
+          ctx.drawImage(img, drawX, drawY, drawW, drawH);
+          ctx.restore();
+          if (el.borderWidth && el.borderColor) {
+            drawRoundedRect(ctx, 0, 0, el.width, el.height, radius);
+            ctx.lineWidth = el.borderWidth;
+            ctx.strokeStyle = el.borderColor;
+            ctx.stroke();
+          }
+        } else {
+          ctx.drawImage(img, 0, 0, el.width, el.height);
+        }
       } catch (err) {
         console.warn('Could not draw image in export:', err);
       }

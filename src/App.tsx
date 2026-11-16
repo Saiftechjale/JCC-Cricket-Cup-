@@ -753,12 +753,16 @@ export default function App() {
             <PlayerManagerView
               lang={lang}
               teams={teams}
+              schedules={schedules}
+              results={results}
               activeProfile={activeProfile}
               templates={allTemplates}
               onSaveTeams={handleSaveTeams}
+              onSaveSchedules={handleSaveSchedules}
+              onSaveResults={handleSaveResults}
               onOpenInEditor={(doc) => {
                 setEditorDoc(doc);
-                setEditorCatFilter('player-list');
+                setEditorCatFilter(doc.category);
                 setActiveSection('poster-maker');
               }}
             />

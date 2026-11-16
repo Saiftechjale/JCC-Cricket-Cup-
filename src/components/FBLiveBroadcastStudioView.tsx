@@ -49,7 +49,9 @@ import {
 const SHARED_CLOUD_ORIGIN =
   'https://ais-pre-jyr2zrqjzkpgapapyfwsme-967710688708.asia-southeast1.run.app';
 
-const SERIES_STORAGE_KEY = 'jale_cricket_8team_series_records_v1';
+export const SERIES_STORAGE_KEY = 'jale_cricket_8team_series_records_v1';
+export const LATEST_LIVE_STATE_STORAGE_KEY =
+  'jale_cricket_latest_live_state_v1';
 
 interface SavedMatchSummaryForSeries {
   id: string;
@@ -756,10 +758,16 @@ export const BroadcastOverlayCanvas: React.FC<{
                   CRR: {crr}
                 </span>
                 {state.targetRuns > 0 ? (
-                  <span className="text-[10px] sm:text-[11px] font-black bg-emerald-600 px-2 py-0.5 rounded text-white">
-                    Target: {state.targetRuns} (Need {runsNeeded} in{' '}
-                    {totalBallsRemaining}b)
-                  </span>
+                  runsNeeded <= 0 ? (
+                    <span className="text-[10px] sm:text-[11px] font-black bg-amber-400 px-2 py-0.5 rounded text-slate-950">
+                      🏆 {cleanTeamA} विजयी! (Target {state.targetRuns} पूरा)
+                    </span>
+                  ) : (
+                    <span className="text-[10px] sm:text-[11px] font-black bg-emerald-600 px-2 py-0.5 rounded text-white">
+                      Target: {state.targetRuns} (Need {runsNeeded} in{' '}
+                      {Math.max(0, totalBallsRemaining)}b)
+                    </span>
+                  )
                 ) : (
                   <span className="text-[10px] font-bold text-amber-200">
                     {state.tossOrStatusNote}
@@ -918,8 +926,20 @@ export const FBLiveBroadcastStudioView: React.FC<
     }
   });
 
-  // Build initial default state with rich batsman, bowler, fielding, and overHistory records
+  // Build initial default state (or restore from localStorage so switching tabs keeps live match)
   const [liveState, setLiveState] = useState<LiveBroadcastRoomState>(() => {
+    try {
+      const savedRaw = localStorage.getItem(LATEST_LIVE_STATE_STORAGE_KEY);
+      if (savedRaw) {
+        const parsed = JSON.parse(savedRaw) as LiveBroadcastRoomState;
+        if (parsed && typeof parsed.runs === 'number') {
+          return parsed;
+        }
+      }
+    } catch {
+      // ignore
+    }
+
     const teamA = teams[0];
     const teamB = teams[1];
     const cleanA = cleanBroadcastName(teamA?.teamName) || 'जाले रॉयल इलेवन';
@@ -1061,6 +1081,15 @@ export const FBLiveBroadcastStudioView: React.FC<
         updatedAt: Date.now(),
       };
       setLiveState(stamped);
+
+      try {
+        localStorage.setItem(
+          LATEST_LIVE_STATE_STORAGE_KEY,
+          JSON.stringify(stamped)
+        );
+      } catch {
+        // ignore
+      }
 
       if (isApplyingRemoteRef.current) return;
 
@@ -1849,6 +1878,123 @@ export const FBLiveBroadcastStudioView: React.FC<
     );
   };
 
+  // Automatic 2nd Innings Starter: Sets Target = (1st Innings Runs + 1), swaps Batting & Bowling teams, and resets 2nd Innings score to 0/0 while keeping full player records
+  const handleStartSecondInnings = () => {
+    const autoTarget = Math.max(1, liveState.runs + 1);
+    const prevBattingTeamId = liveState.battingTeamId;
+    const prevBattingTeamName = liveState.battingTeamName;
+    const prevTeamAPlayers = [...(liveState.teamAPlayers || [])];
+
+    const nextBattingTeamId = liveState.bowlingTeamId;
+    const nextBattingTeamName = liveState.bowlingTeamName;
+    const nextTeamAPlayers = [...(liveState.teamBPlayers || [])];
+
+    const nextBowlingTeamId = prevBattingTeamId;
+    const nextBowlingTeamName = prevBattingTeamName;
+    const nextTeamBPlayers = prevTeamAPlayers;
+
+    const newStriker = nextTeamAPlayers[0] || 'बल्लेबाज 1';
+    const newNonStriker = nextTeamAPlayers[1] || 'बल्लेबाज 2';
+    const newBowler = nextTeamBPlayers[0] || 'गेंदबाज 1';
+
+    const nextBatsmen: Record<string, BatsmanLiveStat> = {
+      ...(liveState.batsmanRecords || {}),
+      [newStriker]: liveState.batsmanRecords?.[newStriker] || {
+        name: newStriker,
+        team: nextBattingTeamName,
+        runs: 0,
+        balls: 0,
+        fours: 0,
+        sixes: 0,
+        isOut: false,
+        dismissalText: 'Not Out',
+      },
+      [newNonStriker]: liveState.batsmanRecords?.[newNonStriker] || {
+        name: newNonStriker,
+        team: nextBattingTeamName,
+        runs: 0,
+        balls: 0,
+        fours: 0,
+        sixes: 0,
+        isOut: false,
+        dismissalText: 'Not Out',
+      },
+    };
+
+    const nextBowlers: Record<string, BowlerLiveStat> = {
+      ...(liveState.bowlerRecords || {}),
+      [newBowler]: liveState.bowlerRecords?.[newBowler] || {
+        name: newBowler,
+        team: nextBowlingTeamName,
+        ballsBowled: 0,
+        runsConceded: 0,
+        wickets: 0,
+        dots: 0,
+        foursConceded: 0,
+        sixesConceded: 0,
+      },
+    };
+
+    setNeedsNextBatsman(false);
+    setNeedsNextBowler(false);
+
+    pushLiveState(
+      {
+        ...liveState,
+        firstInningsTeamName: prevBattingTeamName,
+        firstInningsRuns: liveState.runs,
+        firstInningsWickets: liveState.wickets,
+        firstInningsOvers: `${liveState.overs}.${liveState.balls}`,
+        targetRuns: autoTarget,
+        battingTeamId: nextBattingTeamId,
+        battingTeamName: nextBattingTeamName,
+        bowlingTeamId: nextBowlingTeamId,
+        bowlingTeamName: nextBowlingTeamName,
+        teamAPlayers: nextTeamAPlayers,
+        teamBPlayers: nextTeamBPlayers,
+        runs: 0,
+        wickets: 0,
+        overs: 0,
+        balls: 0,
+        extras: 0,
+        wides: 0,
+        noBalls: 0,
+        byes: 0,
+        legByes: 0,
+        strikerName: newStriker,
+        strikerRuns: nextBatsmen[newStriker].runs,
+        strikerBalls: nextBatsmen[newStriker].balls,
+        strikerFours: nextBatsmen[newStriker].fours,
+        strikerSixes: nextBatsmen[newStriker].sixes,
+        nonStrikerName: newNonStriker,
+        nonStrikerRuns: nextBatsmen[newNonStriker].runs,
+        nonStrikerBalls: nextBatsmen[newNonStriker].balls,
+        nonStrikerFours: nextBatsmen[newNonStriker].fours,
+        nonStrikerSixes: nextBatsmen[newNonStriker].sixes,
+        bowlerName: newBowler,
+        bowlerRuns: nextBowlers[newBowler].runsConceded,
+        bowlerWickets: nextBowlers[newBowler].wickets,
+        bowlerBalls: nextBowlers[newBowler].ballsBowled,
+        bowlerOvers: formatBallsToOvers(nextBowlers[newBowler].ballsBowled),
+        thisOverBalls: [],
+        batsmanRecords: nextBatsmen,
+        bowlerRecords: nextBowlers,
+        tossOrStatusNote: `${nextBattingTeamName} को जीत के लिए ${liveState.totalMatchOvers} ओवर में ${autoTarget} रन चाहिए`,
+        celebration: 'none',
+      },
+      true
+    );
+
+    triggerToast(
+      t3(
+        lang,
+        `🎯 दूसरी पारी शुरू! ${nextBattingTeamName} के लिए टारगेट: ${autoTarget} रन`,
+        `🎯 2nd Innings Started! Target for ${nextBattingTeamName}: ${autoTarget} Runs`,
+        `🎯 2nd Innings शुरू! Target: ${autoTarget} रन`
+      )
+    );
+  };
+
   // Save current match into 8-Team Tournament Series History for Man of the Series
   const handleSaveMatchToSeries = () => {
     const entry: SavedMatchSummaryForSeries = {
@@ -2267,6 +2413,101 @@ export const FBLiveBroadcastStudioView: React.FC<
                 </span>
               </button>
             </div>
+
+            {/* AUTOMATIC 1ST INNINGS COMPLETE BANNER -> 1-CLICK START 2ND INNINGS & SET TARGET */}
+            {liveState.targetRuns === 0 &&
+              (liveState.overs >= liveState.totalMatchOvers ||
+                liveState.wickets >= 10) && (
+                <div className="p-3.5 rounded-2xl bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 text-white border-2 border-amber-300 shadow-xl flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <div className="text-xs sm:text-sm font-black text-amber-300">
+                      🏁{' '}
+                      {t3(
+                        lang,
+                        `पहली पारी पूरी! (${liveState.battingTeamName}: ${liveState.runs}/${liveState.wickets} — ${liveState.overs}.${liveState.balls} Ov)`,
+                        `1st Innings Complete! (${liveState.battingTeamName}: ${liveState.runs}/${liveState.wickets})`,
+                        `1st Innings पूरी! (${liveState.battingTeamName}: ${liveState.runs}/${liveState.wickets})`
+                      )}
+                    </div>
+                    <div className="text-[11px] font-bold text-emerald-100 mt-0.5">
+                      {t3(
+                        lang,
+                        `${liveState.bowlingTeamName} के लिए ऑटोमैटिक टारगेट: ${liveState.runs + 1} रन (${liveState.totalMatchOvers} ओवर)`,
+                        `Auto Target for ${liveState.bowlingTeamName}: ${liveState.runs + 1} Runs (${liveState.totalMatchOvers} Overs)`,
+                        `${liveState.bowlingTeamName} के लिए Target: ${liveState.runs + 1} रन`
+                      )}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleStartSecondInnings}
+                    className="px-4 py-2.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs cursor-pointer shadow-md shrink-0"
+                  >
+                    🔄{' '}
+                    {t3(
+                      lang,
+                      `दूसरी पारी शुरू करें (Target: ${liveState.runs + 1})`,
+                      `Start 2nd Innings (Target: ${liveState.runs + 1})`,
+                      `2nd Innings शुरू करें (Target: ${liveState.runs + 1})`
+                    )}
+                  </button>
+                </div>
+              )}
+
+            {/* LIVE TARGET CHASE STATUS BAR WHEN 2ND INNINGS IS ACTIVE */}
+            {liveState.targetRuns > 0 && (
+              <div className="px-3.5 py-2.5 rounded-2xl bg-emerald-950/90 border border-emerald-400/60 flex flex-wrap items-center justify-between gap-2 text-xs font-black">
+                {liveState.runs >= liveState.targetRuns ? (
+                  <span className="text-amber-300 text-sm">
+                    🏆 {liveState.battingTeamName}{' '}
+                    {t3(
+                      lang,
+                      `विजयी! (Target ${liveState.targetRuns} पूरा किया)`,
+                      `Won the Match! (Chased ${liveState.targetRuns})`,
+                      `विजयी! (Target ${liveState.targetRuns} पूरा)`
+                    )}
+                  </span>
+                ) : (
+                  <span className="text-emerald-300">
+                    🎯{' '}
+                    {t3(
+                      lang,
+                      `टारगेट: ${liveState.targetRuns} रन • जीत के लिए ${Math.max(
+                        0,
+                        liveState.totalMatchOvers * 6 -
+                          (liveState.overs * 6 + liveState.balls)
+                      )} गेंदों में ${Math.max(
+                        0,
+                        liveState.targetRuns - liveState.runs
+                      )} रन चाहिए`,
+                      `Target: ${liveState.targetRuns} • Need ${Math.max(
+                        0,
+                        liveState.targetRuns - liveState.runs
+                      )} runs in ${Math.max(
+                        0,
+                        liveState.totalMatchOvers * 6 -
+                          (liveState.overs * 6 + liveState.balls)
+                      )} balls`,
+                      `Target: ${liveState.targetRuns} • ${Math.max(
+                        0,
+                        liveState.totalMatchOvers * 6 -
+                          (liveState.overs * 6 + liveState.balls)
+                      )} गेंदों में ${Math.max(
+                        0,
+                        liveState.targetRuns - liveState.runs
+                      )} रन चाहिए`
+                    )}
+                  </span>
+                )}
+                {liveState.firstInningsTeamName && (
+                  <span className="text-[11px] font-mono text-amber-300">
+                    1st Inn: {liveState.firstInningsTeamName}{' '}
+                    {liveState.firstInningsRuns}/{liveState.firstInningsWickets}{' '}
+                    ({liveState.firstInningsOvers} Ov)
+                  </span>
+                )}
+              </div>
+            )}
 
             {/* ==============================================================
                 AUTOMATIC POPUP 1: WHEN WICKET FALLS -> PICK FIELDER/KEEPER + NEXT BATSMAN
@@ -2949,35 +3190,231 @@ export const FBLiveBroadcastStudioView: React.FC<
                 />
               </div>
 
-              <div className="space-y-1">
-                <label className="block text-[11px] font-bold text-slate-300">
-                  {t3(lang, 'टारगेट व कुल ओवर:', 'Target & Total Overs:', 'Target & कुल ओवर:')}
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  <input
-                    type="number"
-                    value={liveState.targetRuns}
-                    onChange={(e) =>
-                      pushLiveState({
-                        ...liveState,
-                        targetRuns: Number(e.target.value),
-                      })
-                    }
-                    placeholder="Target"
-                    className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs font-mono font-bold"
-                  />
-                  <input
-                    type="number"
-                    value={liveState.totalMatchOvers}
-                    onChange={(e) =>
-                      pushLiveState({
-                        ...liveState,
-                        totalMatchOvers: Math.max(1, Number(e.target.value)),
-                      })
-                    }
-                    placeholder="Overs (16)"
-                    className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-amber-300 text-xs font-mono font-bold"
-                  />
+              {/* FULL-WIDTH DYNAMIC TOTAL OVERS & AUTOMATIC TARGET CONTROL BOX */}
+              <div className="sm:col-span-2 bg-slate-900/95 rounded-2xl p-3 border border-amber-500/40 space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {/* 1. TOTAL MATCH OVERS (WITH +/- BUTTONS, DIRECT INPUT & 1-TAP PRESETS) */}
+                  <div className="bg-slate-950/90 p-2.5 rounded-xl border border-slate-800 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-black text-amber-300">
+                        ⏱️{' '}
+                        {t3(
+                          lang,
+                          'कुल ओवर सेट करें (Total Overs):',
+                          'Total Match Overs:',
+                          'कुल ओवर (Total Overs):'
+                        )}
+                      </label>
+                      <span className="text-xs font-mono font-black text-white bg-amber-500/20 border border-amber-400/50 px-2 py-0.5 rounded">
+                        {liveState.totalMatchOvers} Overs
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          pushLiveState(
+                            {
+                              ...liveState,
+                              totalMatchOvers: Math.max(
+                                1,
+                                (liveState.totalMatchOvers || 16) - 1
+                              ),
+                            },
+                            true
+                          )
+                        }
+                        className="w-10 h-9 rounded-xl bg-red-600 hover:bg-red-500 text-white font-black flex items-center justify-center cursor-pointer shrink-0 active:scale-95"
+                      >
+                        <Minus className="w-4 h-4 stroke-[3]" />
+                      </button>
+
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={
+                          liveState.totalMatchOvers === 0
+                            ? ''
+                            : String(liveState.totalMatchOvers)
+                        }
+                        onChange={(e) => {
+                          const rawDigits = e.target.value.replace(/\D/g, '');
+                          const numVal =
+                            rawDigits === '' ? 0 : parseInt(rawDigits, 10);
+                          pushLiveState({
+                            ...liveState,
+                            totalMatchOvers: Math.min(99, numVal),
+                          });
+                        }}
+                        onBlur={() => {
+                          if (!liveState.totalMatchOvers || liveState.totalMatchOvers < 1) {
+                            pushLiveState({
+                              ...liveState,
+                              totalMatchOvers: 16,
+                            });
+                          }
+                        }}
+                        placeholder="16"
+                        className="flex-1 h-9 px-3 rounded-xl bg-slate-900 border-2 border-amber-400/70 text-center text-amber-300 text-sm font-mono font-black focus:outline-none"
+                      />
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          pushLiveState(
+                            {
+                              ...liveState,
+                              totalMatchOvers: Math.min(
+                                99,
+                                (liveState.totalMatchOvers || 16) + 1
+                              ),
+                            },
+                            true
+                          )
+                        }
+                        className="w-10 h-9 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black flex items-center justify-center cursor-pointer shrink-0 active:scale-95"
+                      >
+                        <Plus className="w-4 h-4 stroke-[3]" />
+                      </button>
+                    </div>
+
+                    {/* 1-Tap Over Presets */}
+                    <div className="grid grid-cols-6 gap-1">
+                      {[6, 8, 10, 12, 16, 20].map((ovPreset) => (
+                        <button
+                          key={ovPreset}
+                          type="button"
+                          onClick={() =>
+                            pushLiveState(
+                              {
+                                ...liveState,
+                                totalMatchOvers: ovPreset,
+                              },
+                              true
+                            )
+                          }
+                          className={`py-1 rounded-lg text-[10px] font-mono font-black cursor-pointer border ${
+                            liveState.totalMatchOvers === ovPreset
+                              ? 'bg-amber-500 text-slate-950 border-amber-300'
+                              : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-amber-400'
+                          }`}
+                        >
+                          {ovPreset} Ov
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* 2. AUTOMATIC & MANUAL TARGET RUNS (WITH 1-CLICK 2ND INNINGS SWITCH) */}
+                  <div className="bg-slate-950/90 p-2.5 rounded-xl border border-slate-800 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-black text-emerald-400">
+                        🎯{' '}
+                        {t3(
+                          lang,
+                          'टारगेट रन (Target Runs):',
+                          'Target Runs (2nd Inn):',
+                          'टारगेट रन (Target):'
+                        )}
+                      </label>
+                      {liveState.targetRuns > 0 ? (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            pushLiveState({ ...liveState, targetRuns: 0 }, true)
+                          }
+                          className="text-[10px] font-black text-red-400 hover:underline cursor-pointer"
+                        >
+                          ✕ {t3(lang, 'हटाएं (1st Inn)', 'Clear (1st Inn)', 'हटाएं')}
+                        </button>
+                      ) : (
+                        <span className="text-[10px] font-bold text-slate-400">
+                          {t3(lang, 'पहली पारी जारी', '1st Innings', '1st Innings')}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          pushLiveState(
+                            {
+                              ...liveState,
+                              targetRuns: Math.max(
+                                0,
+                                (liveState.targetRuns || 0) - 1
+                              ),
+                            },
+                            true
+                          )
+                        }
+                        className="w-10 h-9 rounded-xl bg-red-600 hover:bg-red-500 text-white font-black flex items-center justify-center cursor-pointer shrink-0 active:scale-95"
+                      >
+                        <Minus className="w-4 h-4 stroke-[3]" />
+                      </button>
+
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={
+                          liveState.targetRuns === 0
+                            ? ''
+                            : String(liveState.targetRuns)
+                        }
+                        onChange={(e) => {
+                          const rawDigits = e.target.value.replace(/\D/g, '');
+                          const numVal =
+                            rawDigits === '' ? 0 : parseInt(rawDigits, 10);
+                          pushLiveState({
+                            ...liveState,
+                            targetRuns: Math.min(999, numVal),
+                          });
+                        }}
+                        placeholder={t3(
+                          lang,
+                          '0 (पहली पारी)',
+                          '0 (1st Innings)',
+                          '0 (1st Innings)'
+                        )}
+                        className="flex-1 h-9 px-3 rounded-xl bg-slate-900 border-2 border-emerald-400/70 text-center text-white text-sm font-mono font-black focus:outline-none"
+                      />
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          pushLiveState(
+                            {
+                              ...liveState,
+                              targetRuns: (liveState.targetRuns || 0) + 1,
+                            },
+                            true
+                          )
+                        }
+                        className="w-10 h-9 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black flex items-center justify-center cursor-pointer shrink-0 active:scale-95"
+                      >
+                        <Plus className="w-4 h-4 stroke-[3]" />
+                      </button>
+                    </div>
+
+                    {/* 1-Click Auto Target & 2nd Innings Button */}
+                    <button
+                      type="button"
+                      onClick={handleStartSecondInnings}
+                      className="w-full py-1.5 px-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-[11px] cursor-pointer shadow-xs flex items-center justify-center gap-1 active:scale-95"
+                    >
+                      <RefreshCw className="w-3 h-3" />
+                      <span>
+                        {t3(
+                          lang,
+                          `दूसरी पारी शुरू करें (Auto Target: ${liveState.runs + 1})`,
+                          `Start 2nd Innings (Auto Target: ${liveState.runs + 1})`,
+                          `2nd Innings शुरू करें (Auto Target: ${liveState.runs + 1})`
+                        )}
+                      </span>
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>

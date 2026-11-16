@@ -118,6 +118,10 @@ export interface LiveBroadcastRoomState {
   legByes?: number;
   totalMatchOvers: number;
   targetRuns: number; // 0 if 1st innings
+  firstInningsTeamName?: string;
+  firstInningsRuns?: number;
+  firstInningsWickets?: number;
+  firstInningsOvers?: string;
   tossOrStatusNote: string;
   strikerName: string;
   strikerRuns: number;
@@ -374,6 +378,9 @@ export interface MatchResultRecord {
   winMargin: string;
   playerOfTheMatch: string;
   playerOfTheMatchStats: string;
+  presentedByName?: string;
+  presentedByDesignation?: string;
+  awardPhotoDataUrl?: string;
   venue: string;
 }
 

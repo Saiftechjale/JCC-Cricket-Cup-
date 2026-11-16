@@ -29,14 +29,21 @@ import {
   ScorecardRecord,
   TeamSquadRecord,
   TournamentProfile,
+  LiveBroadcastRoomState,
+  t3,
 } from '../types/studio';
+import { getStickerDataUrl } from '../utils/cricketGraphics';
 import {
   exportDesignDocument,
-  exportResultCardPDF,
   exportSchedulesPrintablePDF,
   exportScorecardPrintablePDF,
 } from '../utils/exportEngine';
 import { DesignMiniPreview } from './DesignMiniPreview';
+import {
+  LATEST_LIVE_STATE_STORAGE_KEY,
+  cleanBroadcastName,
+  computeAutoAwards,
+} from './FBLiveBroadcastStudioView';
 
 interface MatchManagerViewProps {
   lang: Language;
@@ -116,6 +123,9 @@ export const MatchManagerView: React.FC<MatchManagerViewProps> = ({
     winMargin: '28 रनों से शानदार जीत',
     playerOfTheMatch: 'मिर्ज़ा सैफ बेग',
     playerOfTheMatchStats: '76* (32 गेंद) एवं 2 विकेट',
+    presentedByName: activeProfile.chiefGuest || activeProfile.presidentName,
+    presentedByDesignation: 'मुख्य अतिथि एवं समाजसेवी',
+    awardPhotoDataUrl: '',
     venue: activeProfile.venue,
   });
 
@@ -344,6 +354,187 @@ export const MatchManagerView: React.FC<MatchManagerViewProps> = ({
     showToast(lang === 'hi' ? '✓ मैच रिजल्ट सेव हो गया!' : '✓ Result saved!');
   };
 
+  const buildResultMomPosterDoc = (res: MatchResultRecord): DesignDocument => {
+    const photoSrc =
+      res.awardPhotoDataUrl || getStickerDataUrl('batsman-action');
+    return {
+      id: `res-mom-poster-${res.id}`,
+      name: `Match_${res.matchNumber}_MoM_${res.playerOfTheMatch}`,
+      nameHi: `मैच #${res.matchNumber} रिज़ल्ट व मैन ऑफ द मैच — ${res.playerOfTheMatch}`,
+      category: 'result',
+      theme: 'blue-sports',
+      width: 1080,
+      height: 1350,
+      backgroundColor: '#0B192C',
+      backgroundGradient:
+        'linear-gradient(180deg, #071120 0%, #1E3A8A 50%, #090D16 100%)',
+      borderFrameColor: '#F59E0B',
+      borderFrameWidth: 12,
+      innerBorderColor: '#FDE047',
+      updatedAt: new Date().toISOString(),
+      version: 1,
+      elements: [
+        {
+          id: 'rm-logo',
+          type: 'sticker',
+          x: 45,
+          y: 35,
+          width: 115,
+          height: 115,
+          rotation: 0,
+          opacity: 1,
+          locked: false,
+          stickerId: 'jale-logo',
+          imageUrl: activeProfile.tournamentLogo || undefined,
+        },
+        {
+          id: 'rm-head',
+          type: 'heading',
+          x: 175,
+          y: 35,
+          width: 860,
+          height: 115,
+          rotation: 0,
+          opacity: 1,
+          locked: false,
+          text: `${activeProfile.tournamentName}\n(${activeProfile.seasonNumber}) • स्थान: ${res.venue || activeProfile.venue}`,
+          fontFamily: 'Noto Sans Devanagari',
+          fontSize: 31,
+          fontWeight: '900',
+          textAlign: 'center',
+          color: '#FDE047',
+          lineHeight: 1.3,
+        },
+        {
+          id: 'rm-badge',
+          type: 'title',
+          x: 50,
+          y: 165,
+          width: 980,
+          height: 68,
+          rotation: 0,
+          opacity: 1,
+          locked: false,
+          text: `🏏 MATCH #${res.matchNumber} (${res.stage}) • दिनांक: ${res.matchDate}`,
+          fontFamily: 'Noto Sans Devanagari',
+          fontSize: 27,
+          fontWeight: '900',
+          textAlign: 'center',
+          color: '#0B192C',
+          backgroundColor: '#FDE047',
+          borderRadius: 14,
+          padding: 12,
+        },
+        {
+          id: 'rm-scores',
+          type: 'title',
+          x: 50,
+          y: 250,
+          width: 980,
+          height: 170,
+          rotation: 0,
+          opacity: 1,
+          locked: false,
+          text: `${res.teamA}: ${res.teamAScore}/${res.teamAWickets} (${res.teamAOvers} Ov)   VS   ${res.teamB}: ${res.teamBScore}/${res.teamBWickets} (${res.teamBOvers} Ov)\n🏆 ${res.winner} — ${res.winMargin}`,
+          fontFamily: 'Noto Sans Devanagari',
+          fontSize: 27,
+          fontWeight: '900',
+          textAlign: 'center',
+          color: '#FFFFFF',
+          backgroundColor: '#0F172A',
+          borderColor: '#38BDF8',
+          borderWidth: 3,
+          borderRadius: 18,
+          padding: 20,
+          lineHeight: 1.45,
+        },
+        {
+          id: 'rm-photo',
+          type: 'image',
+          label: 'Award Photo',
+          x: 50,
+          y: 440,
+          width: 470,
+          height: 540,
+          rotation: 0,
+          opacity: 1,
+          locked: false,
+          imageUrl: photoSrc,
+          backgroundColor: '#091326',
+          borderColor: '#F59E0B',
+          borderWidth: 6,
+          borderRadius: 22,
+        },
+        {
+          id: 'rm-mom',
+          type: 'body',
+          x: 540,
+          y: 440,
+          width: 490,
+          height: 540,
+          rotation: 0,
+          opacity: 1,
+          locked: false,
+          text: `🏅 MAN OF THE MATCH\n(मैन ऑफ द मैच)\n\n★ ${res.playerOfTheMatch} ★\n\n📊 शानदार प्रदर्शन:\n${res.playerOfTheMatchStats}`,
+          fontFamily: 'Noto Sans Devanagari',
+          fontSize: 29,
+          fontWeight: '900',
+          textAlign: 'center',
+          color: '#FFFFFF',
+          backgroundColor: '#7C2D12',
+          borderColor: '#FDE047',
+          borderWidth: 4,
+          borderRadius: 22,
+          padding: 28,
+          lineHeight: 1.48,
+        },
+        {
+          id: 'rm-guest',
+          type: 'title',
+          x: 50,
+          y: 1005,
+          width: 980,
+          height: 195,
+          rotation: 0,
+          opacity: 1,
+          locked: false,
+          text: `🎖️ जिनके कर-कमलों (हाथों) से मैन ऑफ द मैच दिया गया:\nमाननीय ${res.presentedByName || activeProfile.chiefGuest}\nपद / सम्मान: ${res.presentedByDesignation || 'मुख्य अतिथि एवं समाजसेवी'}`,
+          fontFamily: 'Noto Sans Devanagari',
+          fontSize: 29,
+          fontWeight: '900',
+          textAlign: 'center',
+          color: '#0F172A',
+          backgroundColor: '#FEF08A',
+          borderColor: '#DC2626',
+          borderWidth: 4,
+          borderRadius: 20,
+          padding: 20,
+          lineHeight: 1.4,
+        },
+        {
+          id: 'rm-foot',
+          type: 'subheading',
+          x: 50,
+          y: 1225,
+          width: 980,
+          height: 80,
+          rotation: 0,
+          opacity: 1,
+          locked: false,
+          text: `आयोजन समिति अध्यक्ष: ${activeProfile.presidentName} | मोबाइल: ${activeProfile.contactNumber}`,
+          fontFamily: 'Noto Sans Devanagari',
+          fontSize: 25,
+          fontWeight: '900',
+          textAlign: 'center',
+          color: '#FFFFFF',
+          backgroundColor: '#DC2626',
+          borderRadius: 14,
+          padding: 18,
+        },
+      ],
+    };
+  };
+
   const handleExportResultDoc = async (
     res: MatchResultRecord,
     format: 'pdf' | 'jpg'
@@ -351,53 +542,13 @@ export const MatchManagerView: React.FC<MatchManagerViewProps> = ({
     const key = `${res.id}-${format}`;
     setBusyKey(key);
     try {
-      if (format === 'pdf') {
-        await exportResultCardPDF(res, activeProfile);
-      } else {
-        const baseTpl =
-          templates.find((t) => t.id === 'tpl-poster-match-result') ||
-          templates[0];
-        const customDoc: DesignDocument = {
-          ...baseTpl,
-          name: `Match_${res.matchNumber}_Result_${res.teamA}_vs_${res.teamB}`,
-          elements: baseTpl.elements.map((el) => {
-            if (el.id === 'res-badge') {
-              return { ...el, text: `MATCH #${res.matchNumber} • ${res.stage}` };
-            }
-            if (el.id === 'res-score-a') {
-              return {
-                ...el,
-                text: `${res.teamA}\n${res.teamAScore}/${res.teamAWickets} (${res.teamAOvers} OV)`,
-              };
-            }
-            if (el.id === 'res-score-b') {
-              return {
-                ...el,
-                text: `${res.teamB}\n${res.teamBScore}/${res.teamBWickets} (${res.teamBOvers} OV)`,
-              };
-            }
-            if (el.id === 'res-winner-banner') {
-              return {
-                ...el,
-                text: `🏆 ${res.winner} — ${res.winMargin}`,
-              };
-            }
-            if (el.id === 'res-mom') {
-              return {
-                ...el,
-                text: `★ MAN OF THE MATCH: ${res.playerOfTheMatch} (${res.playerOfTheMatchStats})`,
-              };
-            }
-            return el;
-          }),
-        };
-        await exportDesignDocument(customDoc, {
-          format: 'jpg',
-          preset: 'original',
-          scale: 3,
-          filename: customDoc.name,
-        });
-      }
+      const customDoc = buildResultMomPosterDoc(res);
+      await exportDesignDocument(customDoc, {
+        format,
+        preset: 'original',
+        scale: 3,
+        filename: customDoc.name.replace(/\s+/g, '_'),
+      });
     } finally {
       setBusyKey(null);
     }
@@ -980,9 +1131,7 @@ export const MatchManagerView: React.FC<MatchManagerViewProps> = ({
               </div>
               <div>
                 <label className="block text-xs font-bold text-slate-600 mb-1">
-                  {lang === 'hi'
-                    ? 'मैन ऑफ द मैच (Player of Match)'
-                    : 'Player of the Match'}
+                  {t3(lang, 'मैन ऑफ द मैच खिलाड़ी', 'Player of the Match', 'Man of the Match खिलाड़ी')}
                 </label>
                 <input
                   type="text"
@@ -993,12 +1142,164 @@ export const MatchManagerView: React.FC<MatchManagerViewProps> = ({
                   className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-sm font-semibold"
                 />
               </div>
-              <div className="flex items-end">
+              <div>
+                <label className="block text-xs font-bold text-slate-600 mb-1">
+                  {t3(lang, 'खिलाड़ी का प्रदर्शन (रन/विकेट)', 'Player Stats', 'प्रदर्शन (Stats)')}
+                </label>
+                <input
+                  type="text"
+                  value={newRes.playerOfTheMatchStats}
+                  onChange={(e) =>
+                    setNewRes({
+                      ...newRes,
+                      playerOfTheMatchStats: e.target.value,
+                    })
+                  }
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-sm font-semibold"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-emerald-700 dark:text-emerald-400 mb-1">
+                  {t3(
+                    lang,
+                    '🎖️ किनके हाथों दिया गया (नाम)',
+                    '🎖️ Presented By (Guest Name)',
+                    '🎖️ किनके हाथों दिया गया (Name)'
+                  )}
+                </label>
+                <input
+                  type="text"
+                  value={newRes.presentedByName || ''}
+                  onChange={(e) =>
+                    setNewRes({ ...newRes, presentedByName: e.target.value })
+                  }
+                  placeholder="अतिथि का नाम..."
+                  className="w-full px-3 py-2 rounded-xl border border-emerald-400 dark:border-emerald-700 bg-slate-50 dark:bg-slate-800 text-sm font-semibold"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-emerald-700 dark:text-emerald-400 mb-1">
+                  {t3(
+                    lang,
+                    '🏷️ अतिथि का पद / पहचान',
+                    '🏷️ Guest Designation',
+                    '🏷️ पद / पहचान (Designation)'
+                  )}
+                </label>
+                <input
+                  type="text"
+                  value={newRes.presentedByDesignation || ''}
+                  onChange={(e) =>
+                    setNewRes({
+                      ...newRes,
+                      presentedByDesignation: e.target.value,
+                    })
+                  }
+                  placeholder="मुख्य अतिथि / मुखिया / समाजसेवी..."
+                  className="w-full px-3 py-2 rounded-xl border border-emerald-400 dark:border-emerald-700 bg-slate-50 dark:bg-slate-800 text-sm font-semibold"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-amber-700 dark:text-amber-400 mb-1">
+                  {t3(
+                    lang,
+                    '📷 उस दिन की फोटो लगाएं',
+                    '📷 Upload Match Photo',
+                    '📷 उस दिन की फोटो'
+                  )}
+                </label>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (!f) return;
+                    const reader = new FileReader();
+                    reader.onload = () => {
+                      setNewRes((prev) => ({
+                        ...prev,
+                        awardPhotoDataUrl: String(reader.result),
+                      }));
+                    };
+                    reader.readAsDataURL(f);
+                  }}
+                  className="w-full px-2.5 py-1.5 rounded-xl border border-amber-400 bg-amber-50/40 dark:bg-slate-800 text-xs font-bold cursor-pointer"
+                />
+              </div>
+              <div className="flex items-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    try {
+                      const raw = localStorage.getItem(
+                        LATEST_LIVE_STATE_STORAGE_KEY
+                      );
+                      if (!raw) return;
+                      const live = JSON.parse(raw) as LiveBroadcastRoomState;
+                      const aw = computeAutoAwards(
+                        live.batsmanRecords,
+                        live.bowlerRecords,
+                        live.fieldingRecords
+                      );
+                      const mom = aw.manOfTheMatch;
+                      const tA =
+                        live.firstInningsTeamName ||
+                        cleanBroadcastName(live.battingTeamName);
+                      const tB =
+                        live.firstInningsTeamName !== undefined
+                          ? cleanBroadcastName(live.battingTeamName)
+                          : cleanBroadcastName(live.bowlingTeamName);
+                      setNewRes((prev) => ({
+                        ...prev,
+                        stage: live.matchStage || prev.stage,
+                        teamA: tA,
+                        teamAScore: String(
+                          live.firstInningsTeamName !== undefined
+                            ? live.firstInningsRuns || 0
+                            : live.runs
+                        ),
+                        teamAWickets: String(
+                          live.firstInningsTeamName !== undefined
+                            ? live.firstInningsWickets || 0
+                            : live.wickets
+                        ),
+                        teamAOvers:
+                          live.firstInningsTeamName !== undefined
+                            ? live.firstInningsOvers || '16.0'
+                            : `${live.overs}.${live.balls}`,
+                        teamB: tB,
+                        teamBScore: String(
+                          live.firstInningsTeamName !== undefined ? live.runs : 0
+                        ),
+                        teamBWickets: String(
+                          live.firstInningsTeamName !== undefined
+                            ? live.wickets
+                            : 0
+                        ),
+                        teamBOvers:
+                          live.firstInningsTeamName !== undefined
+                            ? `${live.overs}.${live.balls}`
+                            : '0.0',
+                        winner: tA,
+                        playerOfTheMatch:
+                          cleanBroadcastName(mom?.name) || prev.playerOfTheMatch,
+                        playerOfTheMatchStats:
+                          mom?.summary || prev.playerOfTheMatchStats,
+                      }));
+                      showToast('✓ लाइव मैच से स्कोर व Man of the Match भर दिया गया!');
+                    } catch {
+                      // ignore
+                    }
+                  }}
+                  className="py-2.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs cursor-pointer shrink-0"
+                >
+                  ⚡ {t3(lang, 'लाइव से भरें', 'Auto-Fill', 'Live से भरें')}
+                </button>
                 <button
                   type="submit"
-                  className="w-full py-2.5 px-4 rounded-xl bg-slate-900 dark:bg-amber-500 text-white dark:text-slate-950 font-extrabold text-xs cursor-pointer"
+                  className="flex-1 py-2.5 px-4 rounded-xl bg-slate-900 dark:bg-amber-500 text-white dark:text-slate-950 font-extrabold text-xs cursor-pointer"
                 >
-                  + {lang === 'hi' ? 'रिजल्ट सेव करें' : 'Save Match Result'}
+                  + {t3(lang, 'रिजल्ट सेव करें', 'Save Result', 'Save करें')}
                 </button>
               </div>
             </div>
